@@ -1,0 +1,9 @@
+# 🌈 Arduino LTR381RGB Library
+
+Allows you to read RGB, infrared, and ambient light values from the Lite-On LTR381RGB sensor.
+
+The Lite-On LTR381RGB is a digital light sensor capable of measuring red, green, blue (RGB) color components, infrared (IR) intensity, and ambient light (ALS) levels.
+It communicates over the I²C bus and includes programmable gain, resolution, and interrupt thresholds, making it suitable for applications such as color detection, lux measurement, and automatic brightness or white balance adjustment.
+
+This library provides an easy-to-use API to interface with the Lite-On LTR381RGB color and ambient light sensor.
+It supports RGB, IR, and ALS measurements, as well as automatic calibration, gain and resolution control, interrupt configuration, and color space conversion (HSV/HSL).

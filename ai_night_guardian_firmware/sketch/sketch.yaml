@@ -1,0 +1,15 @@
+profiles:
+  default:
+    fqbn: 
+    platforms:
+      - platform: arduino:zephyr
+    libraries:
+      - dir: libraries/Arduino_Modulino
+      - dir: libraries/STM32duino VL53L4CD
+      - dir: libraries/STM32duino VL53L4ED
+      - dir: libraries/Arduino_LSM6DSOX
+      - dir: libraries/Arduino_LPS22HB
+      - dir: libraries/Arduino_HS300x
+      - dir: libraries/Arduino_LTR381RGB
+
+default_profile: default
