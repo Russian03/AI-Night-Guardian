@@ -45,7 +45,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
     }
   }
 
-  void _onDetect(BarcodeCapture capture) {
+  Future<void> _onDetect(BarcodeCapture capture) async {
     if (_handled) return;
     final barcode = capture.barcodes.firstOrNull;
     final raw = barcode?.rawValue;
@@ -64,11 +64,16 @@ class _QrScanScreenState extends State<QrScanScreen> {
     }
 
     _handled = true;
-    Navigator.of(context).push(
+
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => BleScanScreen(credentials: credentials),
       ),
     );
+
+    // Si el usuario cancela BLE (o WiFi) y vuelve aquí, la cámara debe
+    // volver a poder detectar códigos QR.
+    if (mounted) setState(() => _handled = false);
   }
 
   @override

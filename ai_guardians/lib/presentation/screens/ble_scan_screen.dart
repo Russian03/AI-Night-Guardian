@@ -63,6 +63,22 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
     return 1;
   }
 
+  Future<void> _selectDevice(ScanResult r) async {
+    // Imprescindible: parar el escaneo antes de conectar. Escanear y
+    // conectar a la vez es una causa común de GATT_UNLIKELY en Android.
+    await FlutterBluePlus.stopScan();
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WifiProvisionScreen(
+          credentials: widget.credentials,
+          device: r.device,
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     FlutterBluePlus.stopScan();
@@ -137,16 +153,7 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
                 child: _DeviceResultCard(
                   result: r,
                   bars: _signalBars(r.rssi),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => WifiProvisionScreen(
-                          credentials: widget.credentials,
-                          device: r.device,
-                        ),
-                      ),
-                    );
-                  },
+                  onTap: () => _selectDevice(r),
                 ),
               )),
           if (!_scanning) ...[
