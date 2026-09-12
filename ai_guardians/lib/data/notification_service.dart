@@ -37,4 +37,37 @@ class NotificationService {
       details,
     );
   }
+
+  /// El sensor ha dejado de reportar. Canal aparte y prioridad menor
+  /// para no confundirse con una incidencia real.
+  static Future<void> showConnectionLost({
+    required String room,
+    required String deviceId,
+  }) async {
+    const androidDetails = AndroidNotificationDetails(
+      'ai_night_guardian_connectivity',
+      'Estado de los sensores',
+      channelDescription: 'Avisos de pérdida y recuperación de conexión',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+    );
+    const details = NotificationDetails(android: androidDetails);
+
+    await _plugin.show(
+      // id estable por dispositivo: al reconectar se reemplaza/cancela.
+      _connectionNotificationId(deviceId),
+      '📡 Sin señal en $room',
+      'El sensor ha dejado de reportar. Comprueba la conexión del dispositivo.',
+      details,
+    );
+  }
+
+  /// El sensor vuelve a reportar: retira el aviso de sin señal.
+  static Future<void> clearConnectionLost(String deviceId) async {
+    await _plugin.cancel(_connectionNotificationId(deviceId));
+  }
+
+  /// Id determinista y dentro del rango de int32 que exige Android.
+  static int _connectionNotificationId(String deviceId) =>
+      1000000 + (deviceId.hashCode.abs() % 1000000);
 }

@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+import 'event_log.dart';
 import 'notification_service.dart';
 
 /// Mensaje MQTT ya parseado, con el device_id de origen incluido.
 class DeviceMessage {
   final String deviceId;
-  final String type; // "heartbeat" | "event" | "incident_cleared"
+  /// "heartbeat" | "event" | "incident_cleared" | "connection_lost" | "connection_restored"
+  final String type;
   final Map<String, dynamic> payload;
   DeviceMessage({required this.deviceId, required this.type, required this.payload});
 }
@@ -15,6 +17,9 @@ class DeviceMessage {
 class MqttService {
   MqttService._internal();
   static final MqttService instance = MqttService._internal();
+
+  /// Tiempo sin heartbeat tras el cual se considera el sensor sin señal.
+  static const offlineTimeout = Duration(seconds: 90);
 
   MqttServerClient? _client;
   bool _connecting = false;
@@ -30,6 +35,15 @@ class MqttService {
   final Map<String, DateTime> _lastEventTimes = {};
   final Set<String> _activeIncidents = {};
 
+  /// Dispositivos por los que ya se ha notificado pérdida de señal
+  /// (evita notificar en bucle cada ciclo del watchdog).
+  final Set<String> _offlineDevices = {};
+
+  /// Nombre de habitación por dispositivo, para poder redactar la notificación.
+  final Map<String, String> _roomNames = {};
+
+  Timer? _watchdog;
+
   Map<String, dynamic>? lastHeartbeatFor(String deviceId) => _lastHeartbeats[deviceId];
   DateTime? lastHeartbeatTimeFor(String deviceId) => _lastHeartbeatTimes[deviceId];
 
@@ -37,12 +51,61 @@ class MqttService {
   DateTime? lastEventTimeFor(String deviceId) => _lastEventTimes[deviceId];
   bool hasActiveIncident(String deviceId) => _activeIncidents.contains(deviceId);
 
+  bool isOffline(String deviceId) {
+    final last = _lastHeartbeatTimes[deviceId];
+    return last == null || DateTime.now().difference(last) > offlineTimeout;
+  }
+
   void markIncidentHandled(String deviceId) {
     _activeIncidents.remove(deviceId);
     _controller.add(DeviceMessage(deviceId: deviceId, type: 'incident_cleared', payload: {}));
   }
 
   bool get isConnected => _client?.connectionStatus?.state == MqttConnectionState.connected;
+
+  // -------------------------------------------------------------------------
+  // Vigilancia de conectividad
+  // -------------------------------------------------------------------------
+
+  /// Registra el nombre de habitación para las notificaciones de conectividad.
+  void registerRoomName(String deviceId, String roomName) {
+    _roomNames[deviceId] = roomName;
+  }
+
+  /// Arranca el vigilante que detecta sensores que dejan de reportar.
+  /// Idempotente: llamarlo varias veces no crea timers duplicados.
+  ///
+  /// Limitación conocida: solo funciona mientras la app esté en ejecución.
+  /// La detección fiable requiere LWT en el firmware (ver arquitectura, sección 5).
+  void startConnectivityWatchdog() {
+    _watchdog ??= Timer.periodic(const Duration(seconds: 30), (_) => _checkConnectivity());
+  }
+
+  void _checkConnectivity() {
+    for (final deviceId in _subscribedDevices) {
+      final last = _lastHeartbeatTimes[deviceId];
+
+      // Nunca ha reportado: aún no se puede hablar de "pérdida" de conexión.
+      if (last == null) continue;
+
+      final offline = DateTime.now().difference(last) > offlineTimeout;
+
+      if (offline && !_offlineDevices.contains(deviceId)) {
+        _offlineDevices.add(deviceId);
+        NotificationService.showConnectionLost(
+          room: _roomNames[deviceId] ?? deviceId,
+          deviceId: deviceId,
+        );
+        _controller.add(DeviceMessage(deviceId: deviceId, type: 'connection_lost', payload: {}));
+      } else if (!offline && _offlineDevices.contains(deviceId)) {
+        _offlineDevices.remove(deviceId);
+        NotificationService.clearConnectionLost(deviceId);
+        _controller.add(DeviceMessage(deviceId: deviceId, type: 'connection_restored', payload: {}));
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
 
   Future<void> ensureConnected() async {
     if (isConnected || _connecting) return;
@@ -79,11 +142,28 @@ class MqttService {
         if (kind == 'heartbeat') {
           _lastHeartbeats[deviceId] = data;
           _lastHeartbeatTimes[deviceId] = DateTime.now();
+
+          // Reconexión: retira el aviso de sin señal si lo había.
+          if (_offlineDevices.remove(deviceId)) {
+            NotificationService.clearConnectionLost(deviceId);
+            _controller.add(DeviceMessage(deviceId: deviceId, type: 'connection_restored', payload: {}));
+          }
+
           _controller.add(DeviceMessage(deviceId: deviceId, type: 'heartbeat', payload: data));
         } else if (kind == 'eventos') {
+          final now = DateTime.now();
           _lastEvents[deviceId] = data;
-          _lastEventTimes[deviceId] = DateTime.now();
+          _lastEventTimes[deviceId] = now;
           _activeIncidents.add(deviceId);
+
+          // Historial local para "actividad reciente del turno".
+          EventLog.instance.add(LoggedEvent(
+            deviceId: deviceId,
+            eventType: data['event_type'] as String? ?? 'desconocido',
+            confidence: (data['confidence'] as num?)?.toDouble() ?? 0.0,
+            at: now,
+          ));
+
           _controller.add(DeviceMessage(deviceId: deviceId, type: 'event', payload: data));
           NotificationService.showEventAlert(
             room: data['room'] ?? 'Desconocida',
@@ -105,6 +185,19 @@ class MqttService {
     _client!.subscribe('residencia/$deviceId/heartbeat', MqttQos.atLeastOnce);
     _client!.subscribe('residencia/$deviceId/eventos', MqttQos.atLeastOnce);
     _subscribedDevices.add(deviceId);
+  }
+
+  /// Deja de vigilar un dispositivo eliminado.
+  void forgetDevice(String deviceId) {
+    _subscribedDevices.remove(deviceId);
+    _offlineDevices.remove(deviceId);
+    _roomNames.remove(deviceId);
+    _lastHeartbeats.remove(deviceId);
+    _lastHeartbeatTimes.remove(deviceId);
+    _lastEvents.remove(deviceId);
+    _lastEventTimes.remove(deviceId);
+    _activeIncidents.remove(deviceId);
+    NotificationService.clearConnectionLost(deviceId);
   }
 
   void publishConfig(String deviceId, Map<String, dynamic> payload) {

@@ -18,13 +18,27 @@ class DeviceStore {
     final current = await getAll();
     current.removeWhere((d) => d.deviceId == device.deviceId);
     current.add(device);
-    await prefs.setString(_key, jsonEncode(current.map((d) => d.toJson()).toList()));
+    await _save(prefs, current);
   }
 
   static Future<void> remove(String deviceId) async {
     final prefs = await SharedPreferences.getInstance();
     final current = await getAll();
     current.removeWhere((d) => d.deviceId == deviceId);
-    await prefs.setString(_key, jsonEncode(current.map((d) => d.toJson()).toList()));
+    await _save(prefs, current);
+  }
+
+  /// Cambia el nombre de la habitación conservando la posición en la lista.
+  static Future<void> rename(String deviceId, String newRoomName) async {
+    final prefs = await SharedPreferences.getInstance();
+    final current = await getAll();
+    final i = current.indexWhere((d) => d.deviceId == deviceId);
+    if (i == -1) return;
+    current[i] = SavedDevice(deviceId: deviceId, roomName: newRoomName);
+    await _save(prefs, current);
+  }
+
+  static Future<void> _save(SharedPreferences prefs, List<SavedDevice> devices) {
+    return prefs.setString(_key, jsonEncode(devices.map((d) => d.toJson()).toList()));
   }
 }

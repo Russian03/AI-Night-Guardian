@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../theme/app_theme.dart';
-import 'qr_scan_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -44,15 +43,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         Text('Ajustes', style: Theme.of(context).textTheme.displayLarge),
         const SizedBox(height: 24),
-        _SectionLabel('Apariencia'),
-        _SettingsGroup(children: [
-          _SettingsRow(
-            icon: Icons.dark_mode,
-            label: 'Modo oscuro',
-            trailing: Switch(value: true, onChanged: null, activeColor: AppColors.primaryContainer),
-          ),
-        ]),
-        const SizedBox(height: 20),
         _SectionLabel('Notificaciones'),
         _SettingsGroup(children: [
           _SettingsRow(
@@ -63,20 +53,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: _toggleNotifications,
               activeColor: AppColors.primaryContainer,
             ),
-          ),
-        ]),
-        const SizedBox(height: 20),
-        _SectionLabel('Dispositivos'),
-        _SettingsGroup(children: [
-          _SettingsRow(
-            icon: Icons.add,
-            label: 'Añadir dispositivo',
-            iconColor: AppColors.primary,
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const QrScanScreen()),
-              );
-            },
           ),
         ]),
         const SizedBox(height: 20),

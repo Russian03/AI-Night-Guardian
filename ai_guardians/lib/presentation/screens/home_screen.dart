@@ -4,6 +4,8 @@ import '../../data/device_store.dart';
 import '../../domain/saved_device.dart';
 import '../../data/mqtt_service.dart';
 import '../../theme/app_theme.dart';
+import '../widgets/status_dot.dart';
+import 'device_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,6 +18,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<SavedDevice> _devices = [];
   bool _loading = true;
   StreamSubscription<DeviceMessage>? _sub;
+  Timer? _tick;
 
   @override
   void initState() {
@@ -24,13 +27,19 @@ class _HomeScreenState extends State<HomeScreen> {
     _sub = MqttService.instance.messages.listen((_) {
       if (mounted) setState(() {}); // repinta con los últimos datos cacheados
     });
+    // Refresca "actualizado hace Xs" y el paso a estado sin conexión.
+    _tick = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _load() async {
     final devices = await DeviceStore.getAll();
     for (final d in devices) {
+      MqttService.instance.registerRoomName(d.deviceId, d.roomName);
       await MqttService.instance.subscribeToDevice(d.deviceId);
     }
+    MqttService.instance.startConnectivityWatchdog();
     if (!mounted) return;
     setState(() {
       _devices = devices;
@@ -40,14 +49,41 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _greeting() {
     final hour = DateTime.now().hour;
-    if (hour >= 21 || hour < 6) return 'Turno de noche';
-    if (hour < 13) return 'Buenos días';
-    return 'Buenas tardes';
+    if (hour >= 21 || hour < 6) return 'Buenas noches, Equipo de Guardia';
+    if (hour < 13) return 'Buenos días, Equipo de Guardia';
+    return 'Buenas tardes, Equipo de Guardia';
+  }
+
+  String _dateLine() {
+    final now = DateTime.now();
+    const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const months = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+    ];
+    final hh = now.hour.toString().padLeft(2, '0');
+    final mm = now.minute.toString().padLeft(2, '0');
+    return '${days[now.weekday - 1]}, ${now.day} ${months[now.month - 1]} • $hh:$mm';
+  }
+
+  /// Segundos desde el heartbeat más reciente de cualquier dispositivo.
+  String _lastUpdateLabel() {
+    DateTime? newest;
+    for (final d in _devices) {
+      final t = MqttService.instance.lastHeartbeatTimeFor(d.deviceId);
+      if (t != null && (newest == null || t.isAfter(newest!))) newest = t;
+    }
+    if (newest == null) return 'Sin datos aún';
+    final diff = DateTime.now().difference(newest!);
+    if (diff.inSeconds < 60) return 'Actualizado hace ${diff.inSeconds}s';
+    if (diff.inMinutes < 60) return 'Actualizado hace ${diff.inMinutes} min';
+    return 'Actualizado hace ${diff.inHours} h';
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _tick?.cancel();
     super.dispose();
   }
 
@@ -56,6 +92,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
+
+    final alerts = _devices.where((d) => MqttService.instance.hasActiveIncident(d.deviceId)).length;
+    final offline = _devices.where((d) => MqttService.instance.isOffline(d.deviceId)).length;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -67,43 +106,208 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(_dateLine(), style: Theme.of(context).textTheme.labelSmall),
+                  const SizedBox(height: 2),
                   Text(_greeting(), style: Theme.of(context).textTheme.displayLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${_devices.length} dispositivo${_devices.length == 1 ? '' : 's'} vinculado${_devices.length == 1 ? '' : 's'}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                  const SizedBox(height: 16),
+                  _ShiftSummary(
+                    deviceCount: _devices.length,
+                    alerts: alerts,
+                    offline: offline,
                   ),
                 ],
               ),
             ),
           ),
           if (_devices.isEmpty)
-            const SliverFillRemaining(
+            SliverFillRemaining(
               hasScrollBody: false,
-              child: Center(child: Text('Aún no tienes dispositivos.\nAñade uno desde la pestaña Dispositivos.', textAlign: TextAlign.center)),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.sensors_off, size: 40, color: AppColors.textTertiary),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Aún no tienes dispositivos.\nAñade uno desde la pestaña Dispositivos.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             )
-          else
+          else ...[
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+              sliver: SliverToBoxAdapter(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'MONITORES EN TIEMPO REAL',
+                        style: Theme.of(context)
+                            .textTheme
+                            .labelSmall
+                            ?.copyWith(letterSpacing: 1),
+                      ),
+                    ),
+                    Text(
+                      _lastUpdateLabel(),
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelSmall
+                          ?.copyWith(color: AppColors.primary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, i) => Padding(
                     padding: const EdgeInsets.only(bottom: 14),
-                    child: _LiveDeviceCard(device: _devices[i]),
+                    child: _LiveDeviceCard(
+                      device: _devices[i],
+                      onOpen: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => DeviceDetailScreen(device: _devices[i]),
+                          ),
+                        );
+                        _load();
+                      },
+                    ),
                   ),
                   childCount: _devices.length,
                 ),
               ),
             ),
+          ],
         ],
       ),
     );
   }
 }
 
+// ---------------------------------------------------------------------------
+// Resumen del turno
+// ---------------------------------------------------------------------------
+
+class _ShiftSummary extends StatelessWidget {
+  final int deviceCount;
+  final int alerts;
+  final int offline;
+
+  const _ShiftSummary({
+    required this.deviceCount,
+    required this.alerts,
+    required this.offline,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color badgeColor;
+    final Color badgeSurface;
+    final String badgeText;
+    final bool pulse;
+
+    if (alerts > 0) {
+      badgeColor = AppColors.alertCritical;
+      badgeSurface = AppColors.alertCriticalSurface;
+      badgeText = alerts == 1 ? '1 alerta activa' : '$alerts alertas activas';
+      pulse = true;
+    } else if (offline > 0) {
+      badgeColor = AppColors.statusWarning;
+      badgeSurface = AppColors.statusWarningSurface;
+      badgeText = offline == 1 ? '1 sin conexión' : '$offline sin conexión';
+      pulse = true;
+    } else {
+      badgeColor = AppColors.statusSuccess;
+      badgeSurface = AppColors.statusSuccessSurface;
+      badgeText = 'Todo en orden';
+      pulse = false;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.surfaceContainerHigh,
+            ),
+            child: const Icon(Icons.monitor_heart, size: 20, color: AppColors.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  deviceCount == 1
+                      ? '1 habitación monitorizada'
+                      : '$deviceCount habitaciones monitorizadas',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                Text('Turno nocturno', style: Theme.of(context).textTheme.labelSmall),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: badgeSurface,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                StatusDot(color: badgeColor, pulse: pulse, size: 7),
+                const SizedBox(width: 2),
+                Text(
+                  badgeText,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: badgeColor),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tarjeta de monitor en tiempo real
+// ---------------------------------------------------------------------------
+
 class _LiveDeviceCard extends StatelessWidget {
   final SavedDevice device;
-  const _LiveDeviceCard({required this.device});
+  final VoidCallback onOpen;
+  const _LiveDeviceCard({required this.device, required this.onOpen});
 
   void _showIncidentDialog(BuildContext context) {
     final event = MqttService.instance.lastEventFor(device.deviceId);
@@ -132,7 +336,12 @@ class _LiveDeviceCard extends StatelessWidget {
               children: [
                 const Icon(Icons.warning_amber_rounded, color: AppColors.alertCritical),
                 const SizedBox(width: 8),
-                Expanded(child: Text(event?['event_type'] ?? 'Desconocido', style: Theme.of(ctx).textTheme.titleMedium)),
+                Expanded(
+                  child: Text(
+                    event?['event_type'] ?? 'Desconocido',
+                    style: Theme.of(ctx).textTheme.titleMedium,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -156,13 +365,19 @@ class _LiveDeviceCard extends StatelessWidget {
     );
   }
 
+  String _offlineSince() {
+    final last = MqttService.instance.lastHeartbeatTimeFor(device.deviceId);
+    if (last == null) return 'Sin conexión';
+    final hh = last.hour.toString().padLeft(2, '0');
+    final mm = last.minute.toString().padLeft(2, '0');
+    return 'Sin conexión — $hh:$mm';
+  }
+
   @override
   Widget build(BuildContext context) {
     final payload = MqttService.instance.lastHeartbeatFor(device.deviceId);
-    final lastSeen = MqttService.instance.lastHeartbeatTimeFor(device.deviceId);
     final hasIncident = MqttService.instance.hasActiveIncident(device.deviceId);
-
-    final isStale = lastSeen == null || DateTime.now().difference(lastSeen) > const Duration(seconds: 45);
+    final isStale = MqttService.instance.isOffline(device.deviceId);
 
     final accentColor = hasIncident
         ? AppColors.alertCritical
@@ -171,64 +386,157 @@ class _LiveDeviceCard extends StatelessWidget {
         ? AppColors.alertCriticalSurface
         : (isStale ? AppColors.statusWarningSurface : AppColors.statusSuccessSurface);
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: hasIncident ? accentSurface : AppColors.surfaceCard,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onOpen,
         borderRadius: BorderRadius.circular(18),
-        border: hasIncident ? Border.all(color: AppColors.alertCritical, width: 1.5) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(device.roomName, style: Theme.of(context).textTheme.titleMedium),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: accentSurface, borderRadius: BorderRadius.circular(20)),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.circle, size: 8, color: accentColor),
-                    const SizedBox(width: 6),
-                    Text(
-                      hasIncident ? 'Incidencia activa' : (isStale ? 'Sin conexión' : 'En línea'),
-                      style: TextStyle(fontSize: 12, color: accentColor),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: hasIncident ? accentSurface : AppColors.surfaceCard,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: hasIncident ? AppColors.alertCritical : AppColors.borderSubtle,
+              width: hasIncident ? 1.5 : 1,
+            ),
+            boxShadow: hasIncident
+                ? const [BoxShadow(color: AppColors.alertCriticalSurface, blurRadius: 24, spreadRadius: 1)]
+                : null,
           ),
-          const SizedBox(height: 12),
-          if (payload != null)
-            Row(
-              children: [
-                _MiniStat(icon: Icons.device_thermostat, value: '${payload['temp_c']}°C'),
-                const SizedBox(width: 16),
-                _MiniStat(icon: Icons.bedtime, value: '${payload['lux']} Lux'),
-                const SizedBox(width: 16),
-                _MiniStat(
-                  icon: Icons.graphic_eq,
-                  value: (payload['listening'] == false) ? 'Apagado' : 'Activo',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    hasIncident
+                        ? Icons.emergency
+                        : (isStale ? Icons.wifi_off : Icons.bedroom_parent),
+                    size: 22,
+                    color: accentColor,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      device.roomName,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: accentSurface,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        StatusDot(color: accentColor, pulse: hasIncident || isStale, size: 7),
+                        const SizedBox(width: 2),
+                        Text(
+                          hasIncident
+                              ? 'Incidencia activa'
+                              : (isStale ? _offlineSince() : 'En línea'),
+                          style: TextStyle(fontSize: 12, color: accentColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              // Aviso destacado de pérdida de conexión.
+              if (isStale && !hasIncident) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.statusWarningSurface,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.signal_wifi_statusbar_connected_no_internet_4,
+                          size: 18, color: AppColors.statusWarning),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'El sensor ha dejado de reportar',
+                          style: TextStyle(fontSize: 14, color: AppColors.statusWarning),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
-            )
-          else
-            Text('Esperando datos...', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary)),
-          if (hasIncident) ...[
-            const SizedBox(height: 14),
-            ElevatedButton.icon(
-              onPressed: () => _showIncidentDialog(context),
-              icon: const Icon(Icons.notification_important),
-              label: const Text('Ver incidencia inmediata'),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.alertCritical),
-            ),
-          ],
-        ],
+
+              const SizedBox(height: 14),
+
+              if (payload != null)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MiniStat(
+                        icon: Icons.thermostat,
+                        label: 'Temp',
+                        value: '${payload['temp_c'] ?? '—'}°C',
+                        stale: isStale,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _MiniStat(
+                        icon: Icons.lightbulb,
+                        label: 'Ilum',
+                        value: '${payload['lux'] ?? '—'} Lux',
+                        stale: isStale,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _MiniStat(
+                        icon: Icons.graphic_eq,
+                        label: 'Audio',
+                        value: isStale
+                            ? 'Inalcanzable'
+                            : ((payload['listening'] == false) ? 'Apagado' : 'Activo'),
+                        stale: isStale,
+                        valueColor: isStale
+                            ? AppColors.statusWarning
+                            : ((payload['listening'] == false) ? null : AppColors.secondary),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Text(
+                  'Esperando datos del sensor…',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: AppColors.textSecondary),
+                ),
+
+              if (hasIncident) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _showIncidentDialog(context),
+                    icon: const Icon(Icons.notification_important, size: 20),
+                    label: const Text('Ver incidencia inmediata'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.alertCritical,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -236,18 +544,58 @@ class _LiveDeviceCard extends StatelessWidget {
 
 class _MiniStat extends StatelessWidget {
   final IconData icon;
+  final String label;
   final String value;
-  const _MiniStat({required this.icon, required this.value});
+  final bool stale;
+  final Color? valueColor;
+
+  const _MiniStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.stale = false,
+    this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16, color: AppColors.textSecondary),
-        const SizedBox(width: 4),
-        Text(value, style: Theme.of(context).textTheme.bodyMedium),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: AppColors.textSecondary),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: valueColor ?? (stale ? AppColors.textTertiary : AppColors.textPrimary),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
