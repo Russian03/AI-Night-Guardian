@@ -472,7 +472,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
       childAspectRatio: 1.25,
       children: [
         _MetricCard(
-          label: 'Temperatura',
+          label: 'temp'.tr(),
           icon: Icons.device_thermostat,
           iconColor: AppColors.primary,
           value: temp == null ? '—' : temp.toStringAsFixed(1),
@@ -482,7 +482,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
               : 'amb_temp'.tr(),
         ),
         _MetricCard(
-          label: 'Luminosidad',
+          label: 'lux'.tr(),
           icon: Icons.bedtime,
           iconColor: AppColors.statusWarning,
           value: lux?.toString() ?? '—',
@@ -492,7 +492,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
               : (lux == null ? 'no_read'.tr() : (lux < 10 ? 'darkness'.tr() : 'light_on'.tr())),
         ),
         _MetricCard(
-          label: 'Actividad',
+          label: 'act'.tr(),
           icon: Icons.history,
           iconColor: AppColors.secondary,
           value: uptime == null ? '—' : '${uptime ~/ 3600}h ${(uptime % 3600) ~/ 60}m',
@@ -500,7 +500,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
           caption: 'act_time'.tr(),
         ),
         _MetricCard(
-          label: 'Conexión',
+          label: 'cnct'.tr(),
           icon: Icons.wifi,
           iconColor: AppColors.primaryContainer,
           value: rssi?.toString() ?? '—',

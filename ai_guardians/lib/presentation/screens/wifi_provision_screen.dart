@@ -454,7 +454,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
               enabled: !_awaiting,
               obscureText: _obscurePassword,
               decoration: InputDecoration(
-                labelText: '${'psw'.tr()}',
+                labelText: 'psw'.tr(),
                 prefixIcon: const Icon(Icons.lock_outline),
                 suffixIcon: IconButton(
                   icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
@@ -466,7 +466,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
             TextField(
               controller: _roomCtrl,
               enabled: !_awaiting,
-              decoration: const InputDecoration(labelText: 'Nombre de la habitación', prefixIcon: Icon(Icons.bed_outlined)),
+              decoration: InputDecoration(labelText: 'hab_name'.tr(), prefixIcon: Icon(Icons.bed_outlined)),
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(

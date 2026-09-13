@@ -482,7 +482,7 @@ class _LiveDeviceCard extends StatelessWidget {
                     Expanded(
                       child: _MiniStat(
                         icon: Icons.thermostat,
-                        label: 'Temp',
+                        label: 'temp'.tr(),
                         value: '${payload['temp_c'] ?? '—'}°C',
                         stale: isStale,
                       ),
@@ -491,7 +491,7 @@ class _LiveDeviceCard extends StatelessWidget {
                     Expanded(
                       child: _MiniStat(
                         icon: Icons.lightbulb,
-                        label: 'Ilum',
+                        label: 'lux'.tr(),
                         value: '${payload['lux'] ?? '—'} Lux',
                         stale: isStale,
                       ),

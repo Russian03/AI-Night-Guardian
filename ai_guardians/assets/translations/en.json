@@ -170,5 +170,9 @@
   "att": "Attention",
   "lang": "Language",
   "alert_incidences": "Incident alerts",
-  "app_version": "App version"
+  "app_version": "App version",
+  "act": "Activity",
+  "cnct": "Connexion",
+  "ini": "Home",
+  "hab_name": "Room's name"
 }

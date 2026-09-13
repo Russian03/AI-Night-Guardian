@@ -437,7 +437,7 @@ class _EmptyDevicesStateState extends State<_EmptyDevicesState>
               child: ElevatedButton.icon(
                 onPressed: widget.onAdd,
                 icon: const Icon(Icons.add, size: 20),
-                label: Text('${'add_dev'.tr()}'),
+                label: Text('add_dev'.tr()),
               ),
             ),
             const SizedBox(height: 12),

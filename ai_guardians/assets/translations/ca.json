@@ -170,5 +170,9 @@
   "att": "Atencio",
   "lang": "Idioma",
   "alert_incidences": "Alertes d'incidència",
-  "app_version": "Versió de l'app"
+  "app_version": "Versió de l'app",
+  "act": "Activitat",
+  "cnct": "Conexio",
+  "ini": "Inici",
+  "hab_name": "Nom de l'habitacio"
 }

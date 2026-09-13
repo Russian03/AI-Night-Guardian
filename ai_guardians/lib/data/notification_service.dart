@@ -58,7 +58,7 @@ class NotificationService {
       // id estable por dispositivo: al reconectar se reemplaza/cancela.
       _connectionNotificationId(deviceId),
       '📡 ${'signalles'.tr()} $room',
-      '${'signalles_err'.tr()}',
+      'signalles_err'.tr(),
       details,
     );
   }
