@@ -1,363 +1,436 @@
 # AI Night Guardian
 
-> Detecció acústica d'incidències nocturnes en residències de gent gran, amb inferència local i **sense gravar ni emmagatzemar cap àudio**.
+> Acoustic detection of night-time incidents in care homes, running locally
+> on-device and **without recording or storing any audio**.
 
-Projecte presentat i acceptat a **HackEstiu 2026** (UPC).
+Submitted to **HackEstiu 2026** (Universitat Politècnica de Catalunya).
 
-- **Equip:** Jan Díaz Carreras-Candi · Guillem Guilera Aulet · Joan Montobbio Palmer
-- **Hardware:** Arduino Uno Q + Modulino (temperatura / llum) + mòdul micròfon I2S
-- **Llicència:** open-source — _pendent d'escollir i afegir el fitxer `LICENSE`_
-- **Documentació a Arduino Project Hub:** _pendent de publicar — [afegir enllaç aquí]_
-- **Model d'Edge Impulse (públic):** _pendent de publicar — [afegir enllaç aquí]_
+- **Team:** Jan Díaz Carreras-Candi · Guillem Guilera Aulet · Joan Montobbio Palmer
+- **Affiliation:** ETSETB — Universitat Politècnica de Catalunya (UPC), Barcelona
+- **Hardware:** Arduino UNO Q + Modulino (temperature / light) + USB-C lavalier microphone + 3D printed enclosure
+- **License:** MIT — see [`LICENSE`](LICENSE)
+- **Arduino Project Hub:** *[add link]*
+- **Edge Impulse™ project (public):** *[add link]*
+- **Demo video:** *[add link]*
 
 ---
 
-## Índex
+## Contents
 
-1. [El repte](#1-el-repte)
-2. [La solució](#2-la-solució)
-3. [Privacitat des del disseny](#3-privacitat-des-del-disseny)
-4. [Arquitectura](#4-arquitectura)
+1. [The problem](#1-the-problem)
+2. [The solution](#2-the-solution)
+3. [Privacy by design](#3-privacy-by-design)
+4. [Architecture](#4-architecture)
 5. [Hardware](#5-hardware)
-6. [Estructura del repositori](#6-estructura-del-repositori)
-7. [El dataset](#7-el-dataset)
-8. [El model d'IA (Edge Impulse)](#8-el-model-dia-edge-impulse)
-9. [Posar-lo en marxa](#9-posar-lo-en-marxa)
-10. [Protocols de comunicació](#10-protocols-de-comunicació)
-11. [Estat actual del projecte](#11-estat-actual-del-projecte)
-12. [Requisits d'entrega HackEstiu 2026](#12-requisits-dentrega-hackestiu-2026)
+6. [Repository layout](#6-repository-layout)
+7. [The dataset](#7-the-dataset)
+8. [The model](#8-the-model)
+9. [On-device decision logic](#9-on-device-decision-logic)
+10. [Running it](#10-running-it)
+11. [Communication protocols](#11-communication-protocols)
+12. [Current status](#12-current-status)
+13. [Known limitations](#13-known-limitations)
 
 ---
 
-## 1. El repte
+## 1. The problem
 
-En residències de gent gran, durant el torn de nit, el personal ha de fer rondes periòdiques per totes les habitacions per comprovar que els residents estiguin bé. Aquestes visites són necessàries per detectar incidències —caigudes, episodis de tos persistent, crits d'auxili o plors—, però tenen dos problemes:
+In care homes, night staff work by rounds: they walk into each room to
+check that the resident is all right. Depending on the facility, a given
+room gets a visit roughly once an hour.
 
-- **Interrompen el son** dels residents cada vegada que s'obre una porta.
-- **No garanteixen la detecció** en el moment en què la incidència passa: entre ronda i ronda pot passar mitja hora o més.
+That means there is up to an hour in which nobody knows what is happening
+inside a room. If someone falls, if someone is in distress, it gets noticed
+on the next round — not when it happens.
 
-El repte que ens proposem, de cara a la democratització de la intel·ligència artificial, és resoldre aquesta ineficiència amb un model **accessible per a qualsevol residència o centre sociosanitari**, que identifiqui incidències durant el torn de nit **sense comprometre la privadesa** dels residents i que notifiqui el personal a l'instant.
+The obvious technical fix is a camera or an always-on microphone. But these
+are people's bedrooms, and continuous recording in a resident's room is not
+something anyone should accept. Any system that goes in there has to work
+without keeping the audio.
 
-## 2. La solució
+## 2. The solution
 
-**AI Night Guardian** és un dispositiu basat en Arduino Uno Q que executa un model d'intel·ligència artificial **localment** per classificar sons rellevants dins d'una habitació.
+**AI Night Guardian** is a device built on an Arduino UNO Q that runs a
+neural network **locally** to classify sounds inside a room. It doesn't
+replace the rounds — it covers the time between them.
 
-El sistema distingeix esdeveniments com:
+The model distinguishes five kinds of sound, chosen so that each one maps
+to a different action:
 
-| Esdeveniment | Per què importa |
-|---|---|
-| Roncs | Possibles apnees o dificultat respiratòria |
-| Tos persistent | Infecció respiratòria, ennuegament |
-| Cops / caigudes | Emergència immediata (patró acústic d'impacte) |
-| Crits demanant ajuda | Emergència immediata |
-| Plors | Malestar, dolor, desorientació |
-| Silenci prolongat després d'un soroll inesperat | Possible pèrdua de consciència després d'una caiguda |
+| Class | What it covers | Device action |
+|---|---|---|
+| `impacte` | Impacts, falls, doors | Alert — possible incident |
+| `veu_angoixa` | Screaming, crying, distress | Alert — immediate attention |
+| `tos` | Coughing fits | Alert — low priority |
+| `normal` | Speech, snoring, rain, traffic, alarms | Nothing |
+| `silenci` | A quiet room | Nothing |
 
-Quan detecta un esdeveniment d'interès, **registra l'hora i el tipus d'incidència** i envia una notificació a l'aplicació mòbil del personal. Així els cuidadors poden prioritzar les habitacions que realment requereixen atenció immediata, reduint el temps de resposta.
+When it detects an incident, the device records the time and the type and
+publishes a notification to the staff's mobile app, so carers can
+prioritise the rooms that actually need attention.
 
-**Alertes addicionals** (no acústiques):
+**Additional, non-acoustic alerts:**
 
-- **Canvi d'il·luminació** de l'ambient (encesa/apagada de llums) via sensor Modulino de llum.
-- **Temperatura fora d'un interval configurable** (p. ex. `[20 °C, 30 °C]`), especialment rellevant durant onades de calor.
+- **Ambient light changes** (lights switched on or off) via the Modulino light sensor.
+- **Temperature outside a configurable range** (e.g. `[20 °C, 30 °C]`), particularly relevant during heatwaves.
 
-Com que és un sistema de **baix cost amb processament local**, es pot desplegar fàcilment en residències, centres sociosanitaris i fins i tot domicilis de persones grans que viuen soles. També admet variacions del cas d'ús, com per exemple la detecció de plors de nens petits.
+Because it is a **low-cost system with local processing**, it can be
+deployed in care homes, assisted-living facilities and even in the homes of
+older people living alone.
 
-## 3. Privacitat des del disseny
+## 3. Privacy by design
 
-Aquest és el punt central del projecte i el motiu pel qual és desplegable legalment en una residència sota el RGPD.
+This is the core constraint of the project and the reason it is legally
+deployable in a care home under GDPR.
 
-- **No hi ha cap tractament ni emmagatzematge de dades personals o biomètriques.**
-- El senyal acústic de l'habitació es capta **en streaming directament a la memòria del microcontrolador**.
-- Un cop la xarxa neuronal executa la inferència local, **la finestra d'àudio s'esborra de manera immediata i irreversible**, sense haver estat mai enregistrada.
-- El dispositiu **no retransmet àudio** a l'exterior ni a cap entitat externa a la residència.
-- L'únic que surt del dispositiu són **metadades de text** del tipus:
-
-  ```
-  Habitació 14 — 02:40 — Cop detectat
-  ```
-
-Per tant, el sistema actua legalment com un **sensor d'emergències automatitzat**, i no com un micròfon d'escolta.
-
-L'app inclou a més un **interruptor de "mode escucha"** per habitació, que permet aturar la inferència en qualsevol moment des del mòbil del personal (topic MQTT `config`, veure §10).
-
-## 4. Arquitectura
+- **No personal or biometric data is processed or stored.**
+- The room's acoustic signal is captured **straight into memory**.
+- Once the neural network has run inference, the **audio window is immediately and irreversibly discarded**, having never been written anywhere.
+- The device **does not transmit audio** outside the room.
+- The only thing that leaves the device is **text metadata**:
 
 ```
-┌─────────────────────────────── HABITACIÓ ───────────────────────────────┐
+Room 14 — 02:40 — impact detected
+```
+
+Legally, the system behaves as an **automated emergency sensor**, not as a
+listening microphone.
+
+The app also includes a per-room **listening switch**, which lets staff
+pause inference at any time from their phone (MQTT `config` topic, see §11).
+
+## 4. Architecture
+
+```
+┌──────────────────────────────── ROOM ───────────────────────────────────┐
 │                                                                         │
-│   Micròfon I2S ──► Arduino Uno Q                                        │
-│                    ├── sketch.ino  (Zephyr / MCU)                       │
-│                    │    · captura àudio I2S 16 kHz                      │
-│                    │    · llegeix Modulino: temperatura, humitat, llum   │
-│                    │    · exposa read_sensors() via RouterBridge        │
-│                    │                                                     │
-│                    └── Python (Linux del Uno Q)                         │
-│                         · device_identity.py → device_id + QR            │
-│                         · ble_peripheral.py  → provisioning WiFi per BLE │
-│                         · mqtt_publisher.py  → heartbeat cada 15 s       │
-│                         · config_listener.py → rep ordres de l'app       │
-│                         · [pendent] inferència Edge Impulse             │
+│   USB-C microphone ──► Arduino UNO Q                                    │
+│                        ├── sketch.ino  (Zephyr / MCU)                   │
+│                        │    · reads Modulino: temperature, light        │
+│                        │    · exposes read_sensors() via RouterBridge   │
+│                        │                                                 │
+│                        └── Python (Linux side of the UNO Q)             │
+│                             · device_identity.py → device_id + QR        │
+│                             · ble_peripheral.py  → WiFi provisioning     │
+│                             · mqtt_publisher.py  → heartbeat every 15 s  │
+│                             · config_listener.py → commands from the app │
+│                             · main.py            → Edge Impulse™ inference│
 └──────────────────────────────────┬──────────────────────────────────────┘
                                    │  MQTT / TCP 1883
-                                   │  broker.hivemq.com
                                    │  residencia/<device_id>/{heartbeat,eventos,config}
                                    ▼
                         ┌────────────────────────┐
-                        │  App mòbil (Flutter)   │
-                        │  · onboarding QR + BLE │
-                        │  · dashboard per sala  │
-                        │  · notificacions push  │
+                        │  Mobile app (Flutter)  │
+                        │  · QR + BLE onboarding │
+                        │  · per-room dashboard  │
+                        │  · push notifications  │
                         └────────────────────────┘
 ```
 
-**Flux d'una incidència:** micròfon I2S → finestra d'1–2 s a RAM → finestratge + FFT → filtres Mel / MFCC → **esborrat de la finestra d'àudio** → inferència → si hi ha anomalia, publicació d'un JSON de text a MQTT → notificació local al mòbil del personal.
+**Incident flow:** microphone → 1 s window in RAM → Mel-filterbank energies
+→ **audio window discarded** → inference → if the energy gate, the
+confidence threshold and the refractory period all pass, a JSON text
+message is published over MQTT → notification on the staff phone.
 
 ## 5. Hardware
 
 | Component | Notes |
 |---|---|
-| **Arduino Uno Q** (4 GB) + cable d'alimentació | Placa principal; executa Linux + MCU Zephyr |
-| **Sensors Modulino** | Temperatura (`ModulinoThermo`) i llum (`ModulinoLight`) |
-| **Mòdul micròfon I2S** (p. ex. INMP441) | Capta els sons que es passen a la IA |
-| **Mòdul RTC** (p. ex. DS3231) *(opcional)* | Hora precisa. Alternativa: servidor NTP via WiFi |
+| **Arduino UNO Q** (4 GB) | Main board; runs Linux (Cortex-A) alongside a Zephyr MCU |
+| **T'nB Influence Lapel Microphone USB-C** | Audio capture |
+| **USB-C hub** | Connects microphone and power to the board |
+| **Modulino Thermo** | Room temperature |
+| **Modulino Light** | Ambient light level |
+| **3D printed enclosure** | Custom; STL in this repository |
 
-## 6. Estructura del repositori
+## 6. Repository layout
 
 ```
 AI-Night-Guardian/
-├── ai_night_guardian_firmware/        # Tot el que corre al dispositiu
+├── ai_night_guardian_firmware/        # Everything that runs on the device
 │   ├── sketch/
-│   │   ├── sketch.ino                 # MCU: I2S + Modulino + RouterBridge
-│   │   ├── sketch.yaml                # Perfil de compilació (arduino:zephyr)
-│   │   └── libraries/                 # Llibreries Arduino incloses
-│   ├── ai_night_guardian/             # Capa Python (Linux del Uno Q)
-│   │   ├── main.py                    # Entrypoint: identitat + QR
+│   │   ├── sketch.ino                 # MCU: Modulino sensors + RouterBridge
+│   │   ├── sketch.yaml                # Build profile (arduino:zephyr)
+│   │   └── libraries/
+│   ├── ai_night_guardian/             # Python layer (UNO Q Linux side)
+│   │   ├── main.py                    # Inference loop: VAD, thresholds, MQTT
 │   │   ├── device_identity.py         # device_id, provisioning_key, QR
-│   │   ├── ble_peripheral.py          # GATT per provisionar WiFi des de l'app
-│   │   ├── mqtt_publisher.py          # Heartbeat amb sensors cada 15 s
-│   │   ├── config_listener.py         # Rep {"listening": bool} de l'app
-│   │   └── event_simulator.py         # Publica incidències simulades (demo)
-│   ├── python/                        # Variant llançada per l'Arduino App CLI
+│   │   ├── ble_peripheral.py          # GATT for WiFi provisioning
+│   │   ├── mqtt_publisher.py          # Heartbeat with sensor data
+│   │   └── config_listener.py         # Receives {"listening": bool}
 │   └── app.yaml
 │
-├── ai_guardians/                      # App mòbil Flutter (Android/iOS/desktop)
+├── ai_guardians/                      # Flutter mobile app
 │   └── lib/
-│       ├── main.dart
-│       ├── data/                      # mqtt_service, notification_service, device_store
-│       ├── domain/                    # SavedDevice, DeviceCredentials
-│       ├── presentation/screens/      # splash, home, devices, QR, BLE, WiFi, dashboard, settings
-│       └── theme/
+│       ├── data/                      # mqtt_service, notification_service
+│       ├── domain/
+│       └── presentation/screens/
 │
-├── dataset_final_16khz/               # 30.487 mostres .wav a 16 kHz mono
-├── DATASET INFO.pdf                   # Metodologia d'obtenció i preprocessat
-├── Hackestiu_2026_Project_Proposal.pdf
+├── model/                             # Audio model — see model/README.md
+│   ├── README.md                      # Pipeline docs + design rationale
+│   ├── build_manifest.py              # Labels, dedup, corrupt files, caps
+│   ├── materialize_dataset.py         # Manifest -> one folder per class
+│   ├── segment_events.py              # Energy-based segmentation
+│   ├── yamnet_clean.py                # Semantic segmentation with YAMNet
+│   ├── augment_gain.py                # Random gain, level invariance
+│   └── prepare_room_audio.py          # Silence class from a real room
+│
+├── Creació dataset/                   # Extraction from the source datasets
+├── dataset_final_16khz/               # 30,487 .wav samples at 16 kHz mono
+├── enclosure/                         # 3D printable enclosure (STL)
+├── DATASET INFO.pdf                   # Source datasets and extraction method
 └── README.md
 ```
 
-## 7. El dataset
+## 7. The dataset
 
-`dataset_final_16khz/` conté **30.487 mostres** `.wav` (~7,2 GB), totes normalitzades a **16 kHz mono**. Els noms dels fitxers segueixen el patró `<classe>_<font>_<id>.wav`.
+`dataset_final_16khz/` holds **30,487** `.wav` samples, all normalised to
+**16 kHz mono**. File names follow the pattern `<class>_<source>_<id>.wav`.
 
-### Fonts
+### Sources
 
-| Dataset | Mostres | Llicència / origen |
-|---|---:|---|
-| [AudioSet](https://research.google.com/audioset/) (Google) | 10.463 | Clips de 10 s extrets de YouTube (5.465 *train* + 4.998 *eval*) |
-| [FSD50K](https://zenodo.org/records/4060432) (UPF) | 13.642 | Zenodo (9.692 *dev* + 3.950 *eval*) |
-| [COUGHVID](https://zenodo.org/records/4048312) | 5.902 | Zenodo — tos certificada |
-| [ESC-50](https://github.com/karolpiczak/ESC-50) | 480 | GitHub — mostres netes de 5 s |
-| **Total** | **30.487** | |
+| Dataset | Samples | Origin |
+|---|---|---|
+| [AudioSet](https://research.google.com/audioset/) (Google) | 10,463 | 10 s clips from YouTube |
+| [FSD50K](https://zenodo.org/records/4060432) (UPF) | 13,642 | Zenodo |
+| [COUGHVID](https://zenodo.org/records/4048312) | 5,902 | Zenodo — verified coughing |
+| [ESC-50](https://github.com/karolpiczak/ESC-50) | 480 | GitHub |
+| **Total** | **30,487** | |
 
-### Metodologia d'extracció
+Extraction methodology is documented in **[`DATASET INFO.pdf`](DATASET%20INFO.pdf)**,
+and the extraction scripts are in [`Creació dataset/`](Creaci%C3%B3%20dataset/).
 
-Documentada al detall a **[`DATASET INFO.pdf`](DATASET%20INFO.pdf)**. Resum:
+### Why 16 kHz mono
 
-- **AudioSet** no conté àudio: cal creuar `balanced_train_segments.csv` / `eval_segments.csv` amb els IDs de l'[ontologia](https://github.com/audioset/ontology) i descarregar els fragments amb `yt-dlp` + `FFmpeg`, retallant per marques de temps sense baixar el vídeo sencer. Alguns vídeos ja no estan disponibles.
-- **ESC-50** es filtra pel camp `target` de `esc50.csv` (p. ex. `24` = *Coughing*, `20` = *Crying baby*, `28` = *Snoring*).
-- **FSD50K** requereix creuar els noms numèrics dels `.wav` amb `FSD50K.ground_truth` per aïllar les classes d'interès.
-- **COUGHVID** es filtra estrictament per `cough_detected >= 0.95`, amb `quality_*` ∈ {ok, good} o buit i `severity_*` ∈ {severe} o buit.
+- **16 kHz** is the TinyML standard. By Nyquist it captures up to 8 kHz, and
+  human voice, snoring and impacts carry practically all their acoustic
+  information below 4 kHz. Using 44.1 kHz would only add useless high
+  frequencies and triple the file size.
+- **Mono** because the model doesn't need to know which side the sound came
+  from, only whether it happened and what it was.
 
-### Per què 16 kHz mono
+### Processing pipeline
 
-- **16 kHz** és l'estàndard de TinyML. Pel teorema de Nyquist permet registrar fins a 8 kHz, i la veu humana, els roncs i els cops concentren pràcticament tota la seva informació acústica per sota dels 4 kHz. Usar 44,1 kHz només afegiria freqüències agudes inútils i triplicaria el pes del fitxer, col·lapsant la RAM durant la generació de l'espectrograma.
-- **Mono** perquè el model no necessita saber de quin costat prové el so, només si ha passat i com: divideix el processament matemàtic per dos.
-- Els extractors d'AudioSet i COUGHVID ja forcen `-ar 16000 -ac 1` amb FFmpeg. ESC-50 i FSD50K copien el `.wav` original, així que tot el conjunt es passa per un script unificador que reescriu la capçalera WAV. Com que els `.wav` són PCM sense compressió, recodificar a 16 kHz mono és **transparent** (no degrada el so) i **neteja metadades residuals** que sovint provoquen errors de lectura al pujar a Edge Impulse.
+The raw collection is not usable as-is. The scripts in
+[`model/`](model/) turn it into the training set; each step is documented
+in [`model/README.md`](model/README.md).
 
-### Data augmentation
+Cleaning found substantial problems in the raw data:
 
-Per evitar *overfitting* i falses alarmes, el dataset s'amplia amb ([`audiomentations`](https://github.com/iver56/audiomentations) / [`librosa`](https://librosa.org/)):
+| | |
+|---|---|
+| Exact duplicates (MD5) | 2,634 |
+| Corrupt files (0.0 s) | 2,621 |
+| Clips shorter than 1 s | 1,540 |
 
-1. **Injecció de soroll de fons** — ventilació, soroll de carrer, estàtica. Que el model no es perdi si el resident tus amb l'aire condicionat encès.
-2. **Pitch shifting** — un crit d'auxili d'un home amb veu greu sona molt diferent del d'una dona amb veu aguda.
-3. **Guany aleatori** — un cop a mig metre del micròfon no sona igual que un al bany del fons de l'habitació.
-4. **Time stretching** — una tos persistent pot ser ràpida i entretallada o lenta i espaiada.
-5. **SpecAugment** — emmascarar blocs de temps/freqüència de l'espectrograma per forçar el model a decidir amb pistes incompletes.
+Almost 17% of the collection was unusable before training started.
 
-## 8. El model d'IA (Edge Impulse)
+## 8. The model
 
-Alimentar la xarxa amb àudio cru és inviable en un microcontrolador, així que s'extreuen **features**. Les dues vies, totes dues basades en l'**escala Mel** (que imita com l'oïda humana percep les freqüències):
+Full detail — pipeline, design decisions, every iteration and its numbers —
+is in **[`model/README.md`](model/README.md)**. Summary:
 
-- **Espectrogrames Mel** — imatge 2D (temps × freqüència, color = intensitat). Ideal per a **impactes secs**: cops i caigudes.
-- **MFCC** (13–40 coeficients) — versió molt més comprimida via Transformada Discreta del Cosinus. És l'estàndard d'or per a esdeveniments **vocals**: roncs, crits, plors, tos.
+**Preprocessing:** Mel-filterbank energies (MFE) over 1-second windows with
+a 500 ms stride, 40 filters, 256-point FFT.
 
-### Pipeline en temps real dins del dispositiu
+**Network:** MobileNetV2 transfer learning (Edge Impulse™ keyword-spotting
+block), deployed as an `.eim` binary on the Linux side of the UNO Q at
+**10 ms latency and 177 kB of RAM**.
 
-1. **Captura** — el mòdul I2S grava una finestra d'1–2 s.
-2. **Finestratge** — es divideix en fragments de pocs mil·lisegons.
-3. **FFT** — es calculen les freqüències presents.
-4. **Filtres Mel & MFCC** — es generen els coeficients.
-5. **Esborrat + inferència** — la finestra d'àudio s'esborra immediata i irreversiblement; **només els coeficients** passen pel model.
-6. **Notificació** — si hi ha anomalia, es registra en text (`"Habitació 12 — 03:17 — Cop detectat"`) i s'envia a l'app.
+**What actually moved the needle** was the data, not the network:
 
-Edge Impulse aporta els blocs DSP natius (Mel i MFCC), la gestió visual i etiquetatge del dataset, el data augmentation, i el desplegament directe com a **llibreria d'Arduino (.zip)** llesta per compilar al Uno Q.
+| Iteration | Accuracy | Change |
+|---|---|---|
+| 1 | 46.1% | 10 classes |
+| 2 | 53.3% | 8 classes |
+| 3 | 60.7% | 4 classes, transfer learning |
+| 4 | 64.4% | More data on critical classes |
+| 5 | 75.5% | YAMNet label cleaning |
+| 6 | **76.8%** | Silence class |
+| 7 | 73.7% | Gain augmentation |
 
-> ⚠️ **Requisit d'entrega:** el model entrenat a Edge Impulse ha de ser **públic, obert i accessible per a tothom**. Enllaç del projecte públic: _pendent d'afegir_.
+Two findings worth highlighting:
 
-## 9. Posar-lo en marxa
+**31% of the screaming clips contained no screaming.** FSD50K and AudioSet
+use weak labels — the tag means the sound appears somewhere in a ten-second
+clip, not that it fills it. Filtering the collection through YAMNet, which
+classifies 521 sound types every 0.48 s, and keeping only confirmed
+fragments took accuracy from 64% to 75% **on less data**.
 
-### 9.1 Firmware (Arduino Uno Q)
+**The deployed system runs 30 dB below the training clips.** The MFE block
+is not level-invariant, and the same event reads −33 or −47 dBFS depending
+on distance to the microphone. Rather than matching a level, the model is
+trained with random gains so it cannot rely on absolute volume.
 
-**Requisits:** Arduino CLI amb la plataforma `arduino:zephyr`, Python 3.11+ al Linux de la placa, `nmcli` (NetworkManager) i BlueZ.
+Note the last row: gain augmentation **lowers the score and improves the
+system**. On the real device the previous version raised occasional impact
+alerts during ordinary conversation; this one does not. The validation set
+cannot see the difference, because the problem it solves only exists
+outside the lab.
+
+## 9. On-device decision logic
+
+The classifier runs twice a second — tens of thousands of inferences per
+room per night. Even a small false-positive rate becomes an unusable number
+of notifications, so three filters sit between the model and the phone:
+
+**Energy gate (VAD).** If the RMS of the window is below a calibrated
+floor, the model is not called at all. Silence never reaches the
+classifier, and the board saves the compute.
+
+**Per-class confidence thresholds.** The model is less confident on
+distress than on impacts, so a single global threshold either misses
+screams or floods on impacts.
+
+**Per-class refractory period.** After an alert for a class, further alerts
+for that class are suppressed for a configurable window. One cough during a
+coughing fit is worth a notification; eighty are not.
+
+All three are configured at the top of
+[`main.py`](ai_night_guardian_firmware/ai_night_guardian/main.py).
+
+### Calibrating a new room
+
+Record ~15 minutes of the room with no incidents and run:
 
 ```bash
-# Dependències Python
-pip install qrcode[pil] paho-mqtt bluezero
+python model/prepare_room_audio.py recording.wav silenci
+```
 
-# 1) Compilar i pujar el sketch a la MCU (I2S + Modulino + Bridge)
+It reports the RMS levels of the room, which set the energy gate, and
+produces 2-second clips that can be added as the `silenci` class for a
+room-specific retrain. This takes minutes and is what adapts the system to
+a new environment.
+
+## 10. Running it
+
+### 10.1 Device
+
+**Requirements:** Arduino CLI with the `arduino:zephyr` platform, Python
+3.11+ on the board's Linux side, `nmcli` (NetworkManager) and BlueZ.
+
+```bash
+pip install numpy paho-mqtt qrcode[pil] bluezero
+
+# 1) Build and upload the sketch to the MCU (Modulino + Bridge)
 cd ai_night_guardian_firmware/sketch
 arduino-cli compile --profile default . && arduino-cli upload -p <PORT> --profile default .
 
-# 2) Generar identitat del dispositiu i el QR d'aprovisionament
+# 2) Generate device identity and provisioning QR
 cd ../ai_night_guardian
-python3 main.py               # crea device_identity.json + provisioning_qr.png
+python3 device_identity.py
 
-# 3) Provisionament WiFi per BLE (l'app s'hi connecta i li passa SSID/password)
+# 3) WiFi provisioning over BLE
 sudo python3 ble_peripheral.py
 
-# 4) Publicar heartbeats amb les dades dels sensors
+# 4) Sensor heartbeats
 python3 mqtt_publisher.py
 
-# 5) Escoltar ordres de configuració de l'app (mode escucha on/off)
-python3 config_listener.py
+# 5) Inference loop
+python3 main.py
 ```
 
-Per provar l'app sense el model d'IA, es poden injectar incidències a mà:
+### 10.2 Mobile app
 
-```bash
-python3 event_simulator.py caida     # o: tos, cop, crit, plor...
-```
-
-### 9.2 App mòbil
-
-**Requisits:** Flutter SDK ≥ 3.13.2.
+**Requirements:** Flutter SDK ≥ 3.13.2.
 
 ```bash
 cd ai_guardians
 flutter pub get
-flutter run                   # o: flutter build apk --release
+flutter run          # or: flutter build apk --release
 ```
 
-**Flux d'onboarding:** splash → *Afegir dispositiu* → escaneig del **QR** imprès/mostrat pel dispositiu (`device_id` + `provisioning_key`) → **escaneig BLE** → formulari de **WiFi + nom d'habitació** → el dispositiu es connecta i publica el seu primer heartbeat → **dashboard** amb temperatura, lux, uptime, última incidència i interruptor de mode escucha.
+**Onboarding flow:** splash → *Add device* → scan the **QR** shown by the
+device (`device_id` + `provisioning_key`) → **BLE scan** → **WiFi + room
+name** form → the device connects and publishes its first heartbeat →
+**dashboard** with temperature, lux, uptime, last incident and the
+listening switch.
 
-Permisos necessaris: Bluetooth, càmera (QR), ubicació (requerida per l'escaneig BLE a Android) i notificacions.
+Required permissions: Bluetooth, camera (QR), location (needed for BLE
+scanning on Android) and notifications.
 
-## 10. Protocols de comunicació
+## 11. Communication protocols
 
 ### MQTT
 
-Broker públic de proves: `broker.hivemq.com:1883`. Tots els missatges són JSON amb `v`, `type`, `device_id`, `ts` i `payload`.
+Test broker: `broker.hivemq.com:1883`. All messages are JSON with `v`,
+`type`, `device_id`, `ts` and `payload`.
 
-| Topic | Direcció | Contingut |
+| Topic | Direction | Contents |
 |---|---|---|
-| `residencia/<device_id>/heartbeat` | dispositiu → app | Estat viu cada 15 s |
-| `residencia/<device_id>/eventos` | dispositiu → app | Incidència detectada (QoS 1) |
-| `residencia/<device_id>/config` | app → dispositiu | Configuració (QoS 1) |
+| `residencia/<device_id>/heartbeat` | device → app | Liveness every 15 s |
+| `residencia/<device_id>/eventos` | device → app | Detected incident (QoS 1) |
+| `residencia/<device_id>/config` | app → device | Configuration (QoS 1) |
 
-**Heartbeat:**
-
-```json
-{
-  "v": 1, "type": "heartbeat", "device_id": "AING-9D67B1",
-  "ts": "2026-09-12T02:40:11+0200",
-  "payload": {
-    "room": "Habitació 14", "fw_version": "0.1.0", "uptime_s": 3720,
-    "rssi": -55, "temp_c": 22.4, "lux": 3, "listening": true
-  }
-}
-```
-
-**Esdeveniment:**
+**Event:**
 
 ```json
 {
   "v": 1, "type": "event", "device_id": "AING-9D67B1",
   "ts": "2026-09-12T02:40:11+0200",
   "payload": {
-    "room": "Habitació 14", "event_type": "caida",
-    "confidence": 0.92, "detected_at": "2026-09-12T02:40:11+0200"
+    "room": "Room 14", "event_type": "impacte",
+    "confidence": 0.85, "detected_at": "2026-09-12T02:40:11+0200"
   }
 }
 ```
 
-**Configuració:**
+### BLE provisioning
 
-```json
-{ "type": "config", "payload": { "listening": false } }
-```
+Nordic UART style service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
 
-### BLE (aprovisionament)
-
-Servei tipus Nordic UART: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
-
-| Característica | UUID | Ús |
+| Characteristic | UUID | Use |
 |---|---|---|
-| TX (write) | `…0002-…` | L'app envia `{"type":"wifi_provision","ssid":…,"password":…,"room_name":…}` |
-| RX (notify) | `…0003-…` | Reservat |
+| TX (write) | `…0002-…` | App sends `{"type":"wifi_provision","ssid":…,"password":…,"room_name":…}` |
+| RX (notify) | `…0003-…` | Reserved |
 | STATUS (read/notify) | `…0004-…` | `{"type":"wifi_status","state":"connecting\|connected\|failed","ip":…}` |
 
-### QR d'aprovisionament
+## 12. Current status
 
-```json
-{ "device_id": "AING-XXXXXX", "provisioning_key": "…", "model": "UnoQ-v1", "fw_min_version": "0.1.0" }
-```
+### Working
 
-## 11. Estat actual del projecte
+- [x] Full Flutter app: QR + BLE onboarding, WiFi provisioning, device list, live dashboard, local notifications, listening switch.
+- [x] Persistent device identity and QR generation.
+- [x] MQTT telemetry: heartbeat every 15 s with real temperature and lux via `RouterBridge`.
+- [x] Bidirectional configuration channel.
+- [x] Dataset of 30,487 samples unified at 16 kHz mono, with a documented and reproducible cleaning pipeline.
+- [x] Five-class audio model trained, deployed and running on-device.
+- [x] On-device decision logic: energy gate, per-class thresholds, per-class refractory period.
+- [x] 3D printed enclosure.
 
-### Funcionant
+### Pending
 
-- [x] App Flutter completa: onboarding QR + BLE, provisionament WiFi, llista de dispositius, dashboard en viu, notificacions locals, mode escucha.
-- [x] Provisionament WiFi per BLE des del mòbil (`nmcli`).
-- [x] Identitat de dispositiu persistent + generació del QR.
-- [x] Telemetria MQTT: heartbeat cada 15 s amb temperatura i lux reals via `RouterBridge`.
-- [x] Canal de configuració bidireccional (mode escucha des de l'app).
-- [x] Dataset de 30.487 mostres unificat a 16 kHz mono.
-- [x] Simulador d'esdeveniments per validar el camí complet dispositiu → app.
+- [ ] Temperature and light alerts (the sensors are read; the alert rules are not implemented yet).
+- [ ] RTC (DS3231 or NTP) for accurate timestamps without depending on the network.
+- [ ] A private MQTT broker with TLS and authentication. `broker.hivemq.com` is public and only suitable for prototyping — this is a blocker for any real deployment.
+- [ ] Publish the dataset extraction scripts described in `DATASET INFO.pdf`.
 
-### Pendent
+## 13. Known limitations
 
-- [ ] **Captura d'àudio al sketch.** `sketch.ino` inicialitza l'I2S a 16 kHz i llegeix mostres, però: (a) usa l'API Arduino `I2S` sense incloure `<I2S.h>` (només `<zephyr/drivers/i2s.h>`), i (b) llegeix **una sola mostra cada 2 s** dins del `loop()`, cosa insuficient per classificar. Cal passar a lectura per blocs continus en finestres d'1–2 s.
-- [ ] **Inferència Edge Impulse al dispositiu** i publicació d'esdeveniments reals (ara els publica `event_simulator.py`). El punt d'enganxada és `save_listening_state()` a `config_listener.py`.
-- [ ] **Pujar els scripts d'extracció del dataset** (`audioset_extractor.py`, `esc50_extractor.py`, `fsd50k_extractor.py`, `coughvid_extractor.py` i l'unificador FFmpeg) descrits a `DATASET INFO.pdf`: encara no són al repositori.
-- [ ] **Publicar el projecte d'Edge Impulse** com a públic i enllaçar-lo.
-- [ ] **Documentar a projecthub.arduino.cc** i enllaçar-ho.
-- [ ] Alertes de temperatura fora d'interval configurable i de canvi d'il·luminació.
-- [ ] RTC DS3231 (o NTP) per a hores precises sense dependre de la xarxa.
-- [ ] Broker MQTT propi amb TLS i autenticació: `broker.hivemq.com` és públic i només serveix per a prototipatge.
+**A fall and a closing door sound the same.** This is a limitation of the
+signal, not of the model: the information needed to separate them is not in
+the audio. That's why the class is `impacte` and the alert reads "possible
+incident", not "fall detected". Thunder has the same problem; the light
+sensor already on the board could help rule it out.
 
-## 12. Requisits d'entrega HackEstiu 2026
+**Plosives look like small impacts.** The /p/, /t/ and /k/ sounds in speech
+are broadband bursts with a sharp attack, and they are the main source of
+false alarms while someone is talking in the room.
 
-| Requisit | Estat |
-|---|---|
-| Projecte open-source, tot penjat i documentat a GitHub | ⚠️ Codi penjat i documentat en aquest README; falta el fitxer `LICENSE` i els scripts d'extracció del dataset |
-| Documentat a [projecthub.arduino.cc](https://projecthub.arduino.cc) | ❌ Pendent |
-| Model d'Edge Impulse públic, obert i accessible | ❌ Pendent |
+**Precision is the weak point.** Roughly 30% of `normal` windows are
+classified as some alert class. The decision logic in §9 is what makes the
+system usable in spite of this.
+
+**No clip in the dataset comes from a real care home.** The system is
+trained on generic public audio and validated in a private room. A real
+deployment would need recordings from the actual environment, with the
+consent that implies.
 
 ---
 
-## Llicència
+## License
 
-Aquest projecte és **open-source**, tal com exigeixen les bases d'HackEstiu 2026. Encara cal
-escollir la llicència (MIT i Apache-2.0 són les opcions habituals per a projectes de hackató) i
-afegir el fitxer `LICENSE` a l'arrel del repositori.
+MIT — see [`LICENSE`](LICENSE).
 
-Els datasets d'origen (AudioSet, FSD50K, COUGHVID, ESC-50) conserven les seves llicències respectives; consulteu-les abans de redistribuir `dataset_final_16khz/`.
+The source datasets (AudioSet, FSD50K, COUGHVID, ESC-50) keep their own
+licenses; check them before redistributing `dataset_final_16khz/`.
