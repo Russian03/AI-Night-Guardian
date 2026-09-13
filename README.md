@@ -15,24 +15,6 @@ Submitted to **HackEstiu 2026** (Universitat Politècnica de Catalunya).
 
 ---
 
-## Contents
-
-1. [The problem](#1-the-problem)
-2. [The solution](#2-the-solution)
-3. [Privacy by design](#3-privacy-by-design)
-4. [Architecture](#4-architecture)
-5. [Hardware](#5-hardware)
-6. [Repository layout](#6-repository-layout)
-7. [The dataset](#7-the-dataset)
-8. [The model](#8-the-model)
-9. [On-device decision logic](#9-on-device-decision-logic)
-10. [Running it](#10-running-it)
-11. [Communication protocols](#11-communication-protocols)
-12. [Current status](#12-current-status)
-13. [Known limitations](#13-known-limitations)
-
----
-
 ## 1. The problem
 
 In care homes, night staff work by rounds: they walk into each room to
