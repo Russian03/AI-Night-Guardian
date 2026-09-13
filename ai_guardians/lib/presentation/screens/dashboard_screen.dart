@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/device_credentials.dart';
 import '../../data/mqtt_service.dart';
 import '../../theme/app_theme.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 class DashboardScreen extends StatefulWidget {
   final DeviceCredentials credentials;
@@ -15,7 +16,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic>? _lastPayload;
   DateTime? _lastHeartbeatAt;
-  String _connectionStatus = 'Conectando al broker...';
+  String _connectionStatus = '${'connecting_broker'.tr()}...';
   Timer? _staleCheckTimer;
   StreamSubscription<DeviceMessage>? _sub;
 
@@ -39,12 +40,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() {
         _lastPayload = cachedPayload;
         _lastHeartbeatAt = cachedTime;
-        _connectionStatus = 'En línea';
+        _connectionStatus = '${'online'.tr()}';
         final listeningFromDevice = cachedPayload['listening'] as bool?;
         if (listeningFromDevice != null) _listening = listeningFromDevice;
       });
     } else {
-      setState(() => _connectionStatus = 'Conectado, esperando datos...');
+      setState(() => _connectionStatus = '${'waiting_data'.tr()}...');
     }
 
     _sub = MqttService.instance.messages.listen((msg) {
@@ -54,7 +55,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _lastPayload = msg.payload;
           _lastHeartbeatAt = DateTime.now();
-          _connectionStatus = 'En línea';
+          _connectionStatus = '${'online'.tr()}';
           if (listeningFromDevice != null) _listening = listeningFromDevice;
         });
       }
@@ -68,8 +69,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final elapsed = DateTime.now().difference(_lastHeartbeatAt!);
     final isStale = elapsed > _staleThreshold;
     final label = isStale
-        ? 'Sin conexión — última vez visto: ${_formatTime(_lastHeartbeatAt!)}'
-        : 'En línea';
+        ? '${'connexionless'.tr()}: ${_formatTime(_lastHeartbeatAt!)}'
+        : '${'online'.tr()}';
     if (label != _connectionStatus) {
       setState(() => _connectionStatus = label);
     }
@@ -95,7 +96,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final payload = _lastPayload;
-    final isStale = _connectionStatus.startsWith('Sin conexión');
+    final isStale = _connectionStatus.startsWith('${'no_connexion'.tr()}');
     final hasAlert = false;
 
     return Scaffold(
@@ -117,10 +118,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               crossAxisSpacing: 12,
               childAspectRatio: 1.3,
               children: [
-                _MetricCard(icon: Icons.device_thermostat, label: 'Temperatura', value: '${payload['temp_c']}°C', color: AppColors.primary),
-                _MetricCard(icon: Icons.bedtime, label: 'Luminosidad', value: '${payload['lux']} Lux', color: AppColors.statusWarning),
-                _MetricCard(icon: Icons.history, label: 'Uptime', value: '${payload['uptime_s']}s', color: AppColors.secondary),
-                _MetricCard(icon: Icons.wifi, label: 'Señal', value: '${payload['rssi']} dBm', color: AppColors.primaryContainer),
+                _MetricCard(icon: Icons.device_thermostat, label: '${'temp'.tr()}', value: '${payload['temp_c']}°C', color: AppColors.primary),
+                _MetricCard(icon: Icons.bedtime, label: '${'lux'.tr()}', value: '${payload['lux']} Lux', color: AppColors.statusWarning),
+                _MetricCard(icon: Icons.history, label: '${'uptime'.tr()}', value: '${payload['uptime_s']}s', color: AppColors.secondary),
+                _MetricCard(icon: Icons.wifi, label: '${'signal'.tr()}', value: '${payload['rssi']} dBm', color: AppColors.primaryContainer),
               ],
             ),
             const SizedBox(height: 20),
@@ -141,8 +142,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Modo escucha', style: Theme.of(context).textTheme.titleMedium),
-                      Text(_listening ? 'Activo' : 'Apagado', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary)),
+                      Text('${'listening_mode'.tr()}', style: Theme.of(context).textTheme.titleMedium),
+                      Text(_listening ? '${'active'.tr()}' : '${'off'.tr()}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary)),
                     ],
                   ),
                 ),

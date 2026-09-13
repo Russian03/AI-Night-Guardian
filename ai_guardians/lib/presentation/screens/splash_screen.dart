@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import 'main_shell.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -61,7 +62,7 @@ class _SplashScreenState extends State<SplashScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Vigilancia nocturna inteligente',
+              '${'motto'.tr()}',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: AppColors.textSecondary,
               ),
@@ -80,7 +81,7 @@ class _SplashScreenState extends State<SplashScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 24),
               child: Text(
-                'Turno nocturno seguro',
+                '${'safe_night'.tr()}',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: AppColors.textTertiary,
                 ),

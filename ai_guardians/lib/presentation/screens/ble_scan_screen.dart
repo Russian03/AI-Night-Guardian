@@ -5,6 +5,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../domain/device_credentials.dart';
 import '../../theme/app_theme.dart';
 import 'wifi_provision_screen.dart';
+import 'package:easy_localization/easy_localization.dart';
+
 
 final Guid aingServiceUuid = Guid('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
 
@@ -108,7 +110,7 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.bgElevated,
-        title: const Text('Buscando dispositivo'),
+        title: Text('searching_device'.tr()),
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -147,10 +149,10 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
                   ),
                 ),
                 const SizedBox(height: 20),
-                Text('Escaneo en curso', style: Theme.of(context).textTheme.titleMedium),
+                Text('${'scanning'.tr()}', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
-                  'Buscando ${widget.credentials.deviceId} cerca de ti...',
+                  '${'searching'.tr()} ${widget.credentials.deviceId} ${'nearby'}.tr()...',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
                 ),
               ],
@@ -160,7 +162,7 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text(
-              'DISPOSITIVOS DETECTADOS (${_results.length})',
+              '${'detected_devices'.tr()} (${_results.length})',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(letterSpacing: 1),
             ),
           ),
@@ -178,7 +180,7 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
             OutlinedButton.icon(
               onPressed: _connecting ? null : _startScan,
               icon: const Icon(Icons.sync),
-              label: const Text('Reintentar búsqueda'),
+              label: Text('retry_search'.tr()),
             ),
           ],
         ],

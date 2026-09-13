@@ -1,4 +1,5 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
@@ -32,8 +33,8 @@ class NotificationService {
 
     await _plugin.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      '⚠️ Incidencia en $room',
-      '$eventType detectado (confianza ${(confidence * 100).toStringAsFixed(0)}%)',
+      '⚠️ ${'incidence_msg'.tr()} $room',
+      '$eventType ${'detected'.tr()} (${'confidence'.tr()} ${(confidence * 100).toStringAsFixed(0)}%)',
       details,
     );
   }
@@ -56,8 +57,8 @@ class NotificationService {
     await _plugin.show(
       // id estable por dispositivo: al reconectar se reemplaza/cancela.
       _connectionNotificationId(deviceId),
-      '📡 Sin señal en $room',
-      'El sensor ha dejado de reportar. Comprueba la conexión del dispositivo.',
+      '📡 ${'signalles'.tr()} $room',
+      '${'signalles_err'.tr()}',
       details,
     );
   }

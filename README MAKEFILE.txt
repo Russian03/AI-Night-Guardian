@@ -1,0 +1,6 @@
+- FLUTTER SDK -> add to path
+- descargar Android studio -> no cal Android virtual device si tens Android móvil
+- Android studio -> Android SDK Command-line Tools (latest)
+- Android studio -> NDK
+- cmd -> flutter doctor
+- cmd -> flutter run

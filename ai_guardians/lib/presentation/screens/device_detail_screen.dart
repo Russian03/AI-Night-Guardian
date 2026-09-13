@@ -6,6 +6,7 @@ import '../../data/mqtt_service.dart';
 import '../../domain/saved_device.dart';
 import '../../theme/app_theme.dart';
 import '../widgets/status_dot.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 class DeviceDetailScreen extends StatefulWidget {
   final SavedDevice device;
@@ -69,7 +70,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
   Future<void> _toggleListening(bool value) async {
     if (!MqttService.instance.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sin conexión con el broker. Inténtalo de nuevo.')),
+        SnackBar(content: Text('broker_connectionless'.tr())),
       );
       return;
     }
@@ -91,22 +92,22 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceGrouped,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('Renombrar habitación'),
+        title: Text('rename_room'.tr()),
         content: TextField(
           controller: controller,
           autofocus: true,
           textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(hintText: 'Ej. Habitación 12'),
+          decoration: InputDecoration(hintText: 'example_room'.tr()),
           onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
+            child: Text('cancel'.tr(), style: const TextStyle(color: AppColors.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-            child: const Text('Guardar'),
+            child: Text('save'.tr()),
           ),
         ],
       ),
@@ -130,24 +131,24 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceGrouped,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('Información técnica'),
+        title: Text('tec_info'.tr()),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _InfoRow('Device ID', _device.deviceId),
+            _InfoRow('dev_id'.tr(), _device.deviceId),
             _InfoRow('Firmware', hb['fw_version']?.toString() ?? '—'),
-            _InfoRow('Topic', 'residencia/${_device.deviceId}/#'),
-            _InfoRow('Último heartbeat', lastSeen == null ? 'Nunca' : _clock(lastSeen)),
+            _InfoRow('topic'.tr(), 'residencia/${_device.deviceId}/#'),
+            _InfoRow('heartbeat'.tr(), lastSeen == null ? 'never'.tr() : _clock(lastSeen)),
             _InfoRow(
-              'Edad sensores',
+              'sensors_age'.tr(),
               hb['sensor_age_s'] == null ? '—' : '${hb['sensor_age_s']} s',
             ),
-            _InfoRow('Broker', MqttService.instance.isConnected ? 'Conectado' : 'Desconectado'),
+            _InfoRow('Broker', MqttService.instance.isConnected ? 'connected'.tr() : 'disconnected'.tr()),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cerrar')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text('close'.tr())),
         ],
       ),
     );
@@ -159,19 +160,19 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceGrouped,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text('¿Eliminar ${_device.roomName}?'),
-        content: const Text(
-          'Esta acción desvinculará el sensor del sistema de guardia nocturna y no se puede deshacer.',
-          style: TextStyle(color: AppColors.textSecondary),
+        title: Text('¿${'del'.tr()} ${_device.roomName}?'),
+        content: Text(
+          'actn_desvincular'.tr(),
+          style: const TextStyle(color: AppColors.textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
+            child: Text('cancel'.tr(), style: const TextStyle(color: AppColors.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Eliminar', style: TextStyle(color: AppColors.alertCritical)),
+            child: Text('del'.tr(), style: const TextStyle(color: AppColors.alertCritical)),
           ),
         ],
       ),
@@ -232,7 +233,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
           TextButton.icon(
             onPressed: () => Navigator.of(context).pop(),
             icon: const Icon(Icons.arrow_back_ios, size: 18, color: AppColors.primary),
-            label: const Text('Atrás', style: TextStyle(color: AppColors.primary)),
+            label: Text('back'.tr(), style: const TextStyle(color: AppColors.primary)),
             style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
           ),
           Expanded(
@@ -292,32 +293,32 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
               break;
           }
         },
-        itemBuilder: (_) => const [
+        itemBuilder: (_) => [
           PopupMenuItem(
             value: 'rename',
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.edit, color: AppColors.primary, size: 20),
-              title: Text('Renombrar habitación'),
+              leading: const Icon(Icons.edit, color: AppColors.primary, size: 20),
+              title: Text('rename_room'.tr()),
             ),
           ),
           PopupMenuItem(
             value: 'info',
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.info_outline, color: AppColors.primary, size: 20),
-              title: Text('Ver información técnica'),
+              leading: const Icon(Icons.info_outline, color: AppColors.primary, size: 20),
+              title: Text('see_tec_info'.tr()),
             ),
           ),
-          PopupMenuDivider(),
+          const PopupMenuDivider(),
           PopupMenuItem(
             value: 'delete',
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.delete_forever, color: AppColors.alertCritical, size: 20),
+              leading: const Icon(Icons.delete_forever, color: AppColors.alertCritical, size: 20),
               title: Text(
-                'Eliminar dispositivo',
-                style: TextStyle(color: AppColors.alertCritical, fontWeight: FontWeight.w600),
+                'del_dev'.tr(),
+                style: const TextStyle(color: AppColors.alertCritical, fontWeight: FontWeight.w600),
               ),
             ),
           ),
@@ -329,7 +330,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
   Widget _alertBanner() {
     final event = MqttService.instance.lastEventFor(_device.deviceId) ?? {};
     final at = MqttService.instance.lastEventTimeFor(_device.deviceId);
-    final type = event['event_type'] as String? ?? 'desconocido';
+    final type = event['event_type'] as String? ?? 'unknown'.tr();
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -360,10 +361,10 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
               children: [
                 Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Incidencia activa',
-                        style: TextStyle(
+                        'act_incidence'.tr(),
+                        style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w700,
                           color: AppColors.alertCritical,
@@ -376,9 +377,9 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
                         color: AppColors.alertCritical,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
-                        'URGENTE',
-                        style: TextStyle(
+                      child: Text(
+                        'urg'.tr(),
+                        style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.6,
@@ -390,7 +391,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${_eventLabel(type)} • ${at == null ? "ahora" : _ago(at)}',
+                  '${_eventLabel(type)} • ${at == null ? 'now'.tr() : _ago(at)}',
                   style: const TextStyle(fontSize: 15, color: AppColors.textPrimary),
                 ),
                 const SizedBox(height: 14),
@@ -400,7 +401,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
                     setState(() {});
                   },
                   icon: const Icon(Icons.verified, size: 18),
-                  label: const Text('Alerta atendida'),
+                  label: Text('att_alert'.tr()),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.alertCritical,
                     foregroundColor: Colors.white,
@@ -434,9 +435,9 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Sin señal del sensor',
-                  style: TextStyle(
+                Text(
+                  'no_signal_sensor'.tr(),
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                     color: AppColors.statusWarning,
@@ -444,8 +445,8 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
                 ),
                 Text(
                   last == null
-                      ? 'Nunca se ha recibido un heartbeat'
-                      : 'Último contacto: ${_clock(last)} (${_ago(last)})',
+                      ? 'never_heartbeat'.tr()
+                      : '${'last_contact'.tr()}: ${_clock(last)} (${_ago(last)})',
                   style: Theme.of(context).textTheme.labelSmall,
                 ),
               ],
@@ -477,8 +478,8 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
           value: temp == null ? '—' : temp.toStringAsFixed(1),
           unit: '°C',
           caption: hb?['temp_c_stale'] == true
-              ? 'Última lectura válida'
-              : 'Temperatura ambiente',
+              ? 'last_val_read'.tr()
+              : 'amb_temp'.tr(),
         ),
         _MetricCard(
           label: 'Luminosidad',
@@ -487,8 +488,8 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
           value: lux?.toString() ?? '—',
           unit: 'lux',
           caption: hb?['lux_stale'] == true
-              ? 'Última lectura válida'
-              : (lux == null ? 'Sin lectura' : (lux < 10 ? 'Oscuridad' : 'Luz encendida')),
+              ? 'last_val_read'.tr()
+              : (lux == null ? 'no_read'.tr() : (lux < 10 ? 'darkness'.tr() : 'light_on'.tr())),
         ),
         _MetricCard(
           label: 'Actividad',
@@ -496,7 +497,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
           iconColor: AppColors.secondary,
           value: uptime == null ? '—' : '${uptime ~/ 3600}h ${(uptime % 3600) ~/ 60}m',
           unit: '',
-          caption: 'Tiempo activo',
+          caption: 'act_time'.tr(),
         ),
         _MetricCard(
           label: 'Conexión',
@@ -518,11 +519,11 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
           children: [
             Expanded(
               child: Text(
-                'Actividad reciente del turno',
+                'rec_act'.tr(),
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
-            Text('Últimas 8 horas', style: Theme.of(context).textTheme.labelSmall),
+            Text('8hr'.tr(), style: Theme.of(context).textTheme.labelSmall),
           ],
         ),
         const SizedBox(height: 12),
@@ -540,7 +541,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
                       const Icon(Icons.nightlight_round, color: AppColors.textTertiary, size: 30),
                       const SizedBox(height: 10),
                       Text(
-                        'Sin incidencias en las últimas 8 horas',
+                        '8hr_ok'.tr(),
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.labelSmall,
                       ),
@@ -610,16 +611,14 @@ class _ListeningCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Modo escucha acústica',
+                  'acoustic_mode'.tr(),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 2),
                 Text(
                   pending
-                      ? 'Aplicando cambio en el dispositivo…'
-                      : (listening
-                          ? 'Detectando tos, caídas y voces de angustia'
-                          : 'Micrófono e IA detenidos. No se detectarán incidencias.'),
+                      ? '${'apl_changes'.tr()}…'
+                      : (listening ? 'detecting'.tr() : 'det_stopped'.tr()),
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: (!listening && !pending) ? AppColors.statusWarning : null,
                       ),
@@ -868,28 +867,28 @@ String _canonType(String type) {
 /// Formatea un event_type desconocido de forma legible.
 String _prettyRaw(String type) {
   final s = type.replaceAll(RegExp(r'[_\-]+'), ' ').trim();
-  if (s.isEmpty) return 'Evento sin identificar';
+  if (s.isEmpty) return 'undet_event'.tr();
   return s[0].toUpperCase() + s.substring(1);
 }
 
 String _eventLabel(String type) {
   switch (_canonType(type)) {
     case 'fall':
-      return 'Caída detectada';
+      return 'fall'.tr();
     case 'cough':
-      return 'Tos persistente';
+      return 'cough'.tr();
     case 'distress':
-      return 'Voces de angustia';
+      return 'distress'.tr();
     case 'cry':
-      return 'Llanto detectado';
+      return 'cry'.tr();
     case 'snore':
-      return 'Ronquido';
+      return 'snore'.tr();
     case 'silence':
-      return 'Silencio anómalo';
+      return 'silence_anomalous'.tr();
     case 'light':
-      return 'Cambio de iluminación';
+      return 'light_case'.tr();
     case 'temp':
-      return 'Temperatura fuera de rango';
+      return 'temp_case'.tr();
     default:
       return _prettyRaw(type);
   }
@@ -959,14 +958,14 @@ String _clock(DateTime t) =>
 
 String _ago(DateTime t) {
   final d = DateTime.now().difference(t);
-  if (d.inMinutes < 1) return 'hace unos segundos';
-  if (d.inMinutes < 60) return 'hace ${d.inMinutes} min';
-  return 'hace ${d.inHours} h';
+  if (d.inMinutes < 1) return 'seconds_ago'.tr();
+  if (d.inMinutes < 60) return '${'min1_ago'.tr()}${d.inMinutes} ${'min2_ago'.tr()}';
+  return '${'h1_ago'.tr()}${d.inHours} ${'h2_ago'.tr()}';
 }
 
 String _rssiQuality(int? rssi) {
-  if (rssi == null) return 'Sin datos';
-  if (rssi > -60) return 'Señal excelente';
-  if (rssi > -75) return 'Señal buena';
-  return 'Señal débil';
+  if (rssi == null) return 'no_data'.tr();
+  if (rssi > -60) return 'sgnl_exclnt'.tr();
+  if (rssi > -75) return 'sgnl_ok'.tr();
+  return 'sgnl_bad'.tr();
 }

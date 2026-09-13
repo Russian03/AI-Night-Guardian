@@ -9,6 +9,7 @@ import '../../theme/app_theme.dart';
 import '../widgets/status_dot.dart';
 import 'device_detail_screen.dart';
 import 'qr_scan_screen.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 class DevicesListScreen extends StatefulWidget {
   const DevicesListScreen({super.key});
@@ -62,10 +63,10 @@ class _DevicesListScreenState extends State<DevicesListScreen> {
   String _subtitleFor(SavedDevice device, DeviceStatus status) {
     final last = MqttService.instance.lastHeartbeatTimeFor(device.deviceId);
     if (status == DeviceStatus.stale || last == null) {
-      return 'ID: ${device.deviceId} • Sin conexión';
+      return 'ID: ${device.deviceId} • ${'no_connexion'.tr()}';
     }
     final diff = DateTime.now().difference(last);
-    final ago = diff.inMinutes >= 1 ? 'hace ${diff.inMinutes} min' : 'hace ${diff.inSeconds}s';
+    final ago = diff.inMinutes >= 1 ? '${'min1_ago'.tr()}${diff.inMinutes} ${'min2_ago'.tr()}' : '${'min1_ago'.tr()}${diff.inSeconds}${'s2_ago'.tr()}';
     return 'ID: ${device.deviceId} • $ago';
   }
 
@@ -83,19 +84,19 @@ class _DevicesListScreenState extends State<DevicesListScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceGrouped,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text('¿Eliminar ${device.roomName}?'),
-        content: const Text(
-          'Esta acción desvinculará el sensor del sistema de guardia nocturna y no se puede deshacer.',
+        title: Text('¿${'del'.tr()} ${device.roomName}?'),
+        content: Text(
+          '${'actn_desvincular'.tr()}',
           style: TextStyle(color: AppColors.textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
+            child: const Text('${'cancel'}', style: TextStyle(color: AppColors.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Eliminar', style: TextStyle(color: AppColors.alertCritical)),
+            child: Text('${'del'.tr()}', style: TextStyle(color: AppColors.alertCritical)),
           ),
         ],
       ),
@@ -137,11 +138,11 @@ class _DevicesListScreenState extends State<DevicesListScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Dispositivos', style: Theme.of(context).textTheme.displayLarge),
+                    Text('${'devs'.tr()}', style: Theme.of(context).textTheme.displayLarge),
                     const SizedBox(height: 2),
                     Text(
                       _devices.isEmpty
-                          ? 'Gestión de sensores y monitorización nocturna'
+                          ? '${'gest_sens'.tr()}'
                           : '${_devices.length} ${_devices.length == 1 ? "sensor vinculado" : "sensores vinculados"}',
                       style: Theme.of(context).textTheme.labelSmall,
                     ),
@@ -417,13 +418,13 @@ class _EmptyDevicesStateState extends State<_EmptyDevicesState>
             ),
             const SizedBox(height: 28),
             Text(
-              'Ningún dispositivo vinculado',
+              '${'no_dev_vinc'.tr()}',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
             Text(
-              'Vincula tu primer sensor AI Night Guardian para empezar a monitorizar las habitaciones durante el turno de noche.',
+              '${'vinc_dev'.tr()}',
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme
@@ -436,7 +437,7 @@ class _EmptyDevicesStateState extends State<_EmptyDevicesState>
               child: ElevatedButton.icon(
                 onPressed: widget.onAdd,
                 icon: const Icon(Icons.add, size: 20),
-                label: const Text('Agregar dispositivo'),
+                label: Text('${'add_dev'.tr()}'),
               ),
             ),
             const SizedBox(height: 12),
@@ -446,7 +447,7 @@ class _EmptyDevicesStateState extends State<_EmptyDevicesState>
                 const Icon(Icons.qr_code_2, size: 16, color: AppColors.textTertiary),
                 const SizedBox(width: 6),
                 Text(
-                  'Necesitarás el código QR del sensor',
+                  '${'need_qr'.tr()}',
                   style: Theme.of(context).textTheme.labelSmall,
                 ),
               ],

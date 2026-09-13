@@ -6,6 +6,7 @@ import '../../data/mqtt_service.dart';
 import '../../theme/app_theme.dart';
 import '../widgets/status_dot.dart';
 import 'device_detail_screen.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -49,17 +50,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _greeting() {
     final hour = DateTime.now().hour;
-    if (hour >= 21 || hour < 6) return 'Buenas noches, Equipo de Guardia';
-    if (hour < 13) return 'Buenos días, Equipo de Guardia';
-    return 'Buenas tardes, Equipo de Guardia';
+    if (hour >= 21 || hour < 6) return 'gn'.tr();
+    if (hour < 13) return 'gm'.tr();
+    return 'ga'.tr();
   }
 
   String _dateLine() {
     final now = DateTime.now();
-    const days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-    const months = [
-      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+    // Corregido el duplicado 'dx' (miércoles) por 'dj' (jueves)
+    final days = ['dll'.tr(), 'dm'.tr(), 'dx'.tr(), 'dj'.tr(), 'dv'.tr(), 'ds'.tr(), 'dg'.tr()];
+    final months = [
+      'gen1'.tr(), 'feb2'.tr(), 'mar3'.tr(), 'abr4'.tr(), 'mai5'.tr(), 'jun6'.tr(),
+      'jul7'.tr(), 'ago8'.tr(), 'sep9'.tr(), 'oct10'.tr(), 'nov11'.tr(), 'dec12'.tr(),
     ];
     final hh = now.hour.toString().padLeft(2, '0');
     final mm = now.minute.toString().padLeft(2, '0');
@@ -73,11 +75,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final t = MqttService.instance.lastHeartbeatTimeFor(d.deviceId);
       if (t != null && (newest == null || t.isAfter(newest!))) newest = t;
     }
-    if (newest == null) return 'Sin datos aún';
+    if (newest == null) return 'no_data_yet'.tr();
     final diff = DateTime.now().difference(newest!);
-    if (diff.inSeconds < 60) return 'Actualizado hace ${diff.inSeconds}s';
-    if (diff.inMinutes < 60) return 'Actualizado hace ${diff.inMinutes} min';
-    return 'Actualizado hace ${diff.inHours} h';
+    if (diff.inSeconds < 60) return '${'actu1_ago'.tr()}${diff.inSeconds}${'s2_ago'.tr()}';
+    if (diff.inMinutes < 60) return '${'actu1_ago'.tr()}${diff.inMinutes}${'min2_ago'.tr()}';
+    return '${'actu1_ago'.tr()}${diff.inHours}${'h2_ago'.tr()}';
   }
 
   @override
@@ -131,7 +133,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Icon(Icons.sensors_off, size: 40, color: AppColors.textTertiary),
                       const SizedBox(height: 12),
                       Text(
-                        'Aún no tienes dispositivos.\nAñade uno desde la pestaña Dispositivos.',
+                        'no_dev_yet'.tr(),
                         textAlign: TextAlign.center,
                         style: Theme.of(context)
                             .textTheme
@@ -151,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        'MONITORES EN TIEMPO REAL',
+                        'mon_rt'.tr(),
                         style: Theme.of(context)
                             .textTheme
                             .labelSmall
@@ -223,17 +225,17 @@ class _ShiftSummary extends StatelessWidget {
     if (alerts > 0) {
       badgeColor = AppColors.alertCritical;
       badgeSurface = AppColors.alertCriticalSurface;
-      badgeText = alerts == 1 ? '1 alerta activa' : '$alerts alertas activas';
+      badgeText = alerts == 1 ? '1 ${'act_alert'.tr()}' : '$alerts ${'act_alerts'.tr()}';
       pulse = true;
     } else if (offline > 0) {
       badgeColor = AppColors.statusWarning;
       badgeSurface = AppColors.statusWarningSurface;
-      badgeText = offline == 1 ? '1 sin conexión' : '$offline sin conexión';
+      badgeText = offline == 1 ? '1 ${'no_connexion_minus'.tr()}' : '$offline ${'no_connexion_minus'.tr()}';
       pulse = true;
     } else {
       badgeColor = AppColors.statusSuccess;
       badgeSurface = AppColors.statusSuccessSurface;
-      badgeText = 'Todo en orden';
+      badgeText = 'all_good'.tr();
       pulse = false;
     }
 
@@ -262,8 +264,8 @@ class _ShiftSummary extends StatelessWidget {
               children: [
                 Text(
                   deviceCount == 1
-                      ? '1 habitación monitorizada'
-                      : '$deviceCount habitaciones monitorizadas',
+                      ? '1 ${'hab_monitor'.tr()}'
+                      : '$deviceCount ${'hab_monitor'.tr()}',
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 15,
@@ -271,7 +273,7 @@ class _ShiftSummary extends StatelessWidget {
                     color: AppColors.textPrimary,
                   ),
                 ),
-                Text('Turno nocturno', style: Theme.of(context).textTheme.labelSmall),
+                Text('nturn'.tr(), style: Theme.of(context).textTheme.labelSmall),
               ],
             ),
           ),
@@ -321,7 +323,7 @@ class _LiveDeviceCard extends StatelessWidget {
         titlePadding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
         title: Row(
           children: [
-            const Expanded(child: Text('Última incidencia')),
+            Expanded(child: Text('last_event'.tr())),
             IconButton(
               icon: const Icon(Icons.close),
               onPressed: () => Navigator.of(ctx).pop(),
@@ -338,7 +340,7 @@ class _LiveDeviceCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    event?['event_type'] ?? 'Desconocido',
+                    event?['event_type'] ?? 'unknown'.tr(),
                     style: Theme.of(ctx).textTheme.titleMedium,
                   ),
                 ),
@@ -358,7 +360,7 @@ class _LiveDeviceCard extends StatelessWidget {
               MqttService.instance.markIncidentHandled(device.deviceId);
               Navigator.of(ctx).pop();
             },
-            child: const Text('Incidencia atendida'),
+            child: Text('att_alert'.tr()),
           ),
         ],
       ),
@@ -367,10 +369,10 @@ class _LiveDeviceCard extends StatelessWidget {
 
   String _offlineSince() {
     final last = MqttService.instance.lastHeartbeatTimeFor(device.deviceId);
-    if (last == null) return 'Sin conexión';
+    if (last == null) return 'no_connexion'.tr();
     final hh = last.hour.toString().padLeft(2, '0');
     final mm = last.minute.toString().padLeft(2, '0');
-    return 'Sin conexión — $hh:$mm';
+    return '${'no_connexion'.tr()} — $hh:$mm';
   }
 
   @override
@@ -437,8 +439,8 @@ class _LiveDeviceCard extends StatelessWidget {
                         const SizedBox(width: 2),
                         Text(
                           hasIncident
-                              ? 'Incidencia activa'
-                              : (isStale ? _offlineSince() : 'En línea'),
+                              ? 'act_incidence'.tr()
+                              : (isStale ? _offlineSince() : 'online'.tr()),
                           style: TextStyle(fontSize: 12, color: accentColor),
                         ),
                       ],
@@ -456,15 +458,15 @@ class _LiveDeviceCard extends StatelessWidget {
                     color: AppColors.statusWarningSurface,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      Icon(Icons.signal_wifi_statusbar_connected_no_internet_4,
+                      const Icon(Icons.signal_wifi_statusbar_connected_no_internet_4,
                           size: 18, color: AppColors.statusWarning),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'El sensor ha dejado de reportar',
-                          style: TextStyle(fontSize: 14, color: AppColors.statusWarning),
+                          'signalless_sensor'.tr(),
+                          style: const TextStyle(fontSize: 14, color: AppColors.statusWarning),
                         ),
                       ),
                     ],
@@ -500,8 +502,8 @@ class _LiveDeviceCard extends StatelessWidget {
                         icon: Icons.graphic_eq,
                         label: 'Audio',
                         value: isStale
-                            ? 'Inalcanzable'
-                            : ((payload['listening'] == false) ? 'Apagado' : 'Activo'),
+                            ? 'unavailable'.tr()
+                            : ((payload['listening'] == false) ? 'off'.tr() : 'active'.tr()),
                         stale: isStale,
                         valueColor: isStale
                             ? AppColors.statusWarning
@@ -512,7 +514,7 @@ class _LiveDeviceCard extends StatelessWidget {
                 )
               else
                 Text(
-                  'Esperando datos del sensor…',
+                  '${'waiting_sensor'.tr()}...',
                   style: Theme.of(context)
                       .textTheme
                       .bodyMedium
@@ -526,7 +528,7 @@ class _LiveDeviceCard extends StatelessWidget {
                   child: ElevatedButton.icon(
                     onPressed: () => _showIncidentDialog(context),
                     icon: const Icon(Icons.notification_important, size: 20),
-                    label: const Text('Ver incidencia inmediata'),
+                    label: Text('see_incidence'.tr()),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.alertCritical,
                       foregroundColor: Colors.white,

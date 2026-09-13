@@ -6,6 +6,7 @@ import '../../domain/device_credentials.dart';
 import '../../theme/app_theme.dart';
 import 'ble_scan_screen.dart';
 import 'main_shell.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 class QrScanScreen extends StatefulWidget {
   const QrScanScreen({super.key});
@@ -56,7 +57,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
       final json = jsonDecode(raw) as Map<String, dynamic>;
       credentials = DeviceCredentials.fromJson(json);
     } catch (e) {
-      setState(() => _errorText = 'QR no válido para AI Night Guardian');
+      setState(() => _errorText = '${'err_qr'.tr()}');
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) setState(() => _errorText = null);
       });
@@ -96,8 +97,8 @@ class _QrScanScreenState extends State<QrScanScreen> {
               children: [
                 const Icon(Icons.camera_alt_outlined, color: Colors.white54, size: 48),
                 const SizedBox(height: 16),
-                const Text(
-                  'Se necesita acceso a la cámara para escanear el código QR',
+                Text(
+                  '${'cam_acc'.tr()}',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70),
                 ),
@@ -108,7 +109,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
                 ),
                 TextButton(
                   onPressed: _goBackOrHome,
-                  child: const Text('Cancelar', style: TextStyle(color: Colors.white70)),
+                  child: Text('${'cancel'.tr()}', style: TextStyle(color: Colors.white70)),
                 ),
               ],
             ),
@@ -132,10 +133,10 @@ class _QrScanScreenState extends State<QrScanScreen> {
                     children: [
                       TextButton(
                         onPressed: _goBackOrHome,
-                        child: const Text('Cancelar', style: TextStyle(color: Colors.white)),
+                        child: Text('${'cancel'.tr()}', style: TextStyle(color: Colors.white)),
                       ),
                       const Spacer(),
-                      const Text('Añadir dispositivo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      Text('${'add_dev'.tr()}', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                       const Spacer(),
                       const SizedBox(width: 72),
                     ],
@@ -156,7 +157,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
                   child: Text(
-                    _errorText ?? 'Apunta la cámara al código QR del dispositivo',
+                    _errorText ?? '${'err_qr2'.tr()}',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: _errorText != null ? AppColors.alertCritical : Colors.white70,

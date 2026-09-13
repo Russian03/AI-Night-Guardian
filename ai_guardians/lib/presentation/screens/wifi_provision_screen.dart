@@ -11,6 +11,7 @@ import '../../domain/saved_device.dart';
 import '../../data/mqtt_service.dart';
 import '../../theme/app_theme.dart';
 import 'main_shell.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 final Guid charTxUuid = Guid('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
 final Guid charStatusUuid = Guid('6e400004-b5a3-f393-e0a9-e50e24dcca9e');
@@ -30,11 +31,11 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
   static const _confirmationTimeout = Duration(seconds: 90);
 
   final _passCtrl = TextEditingController();
-  final _roomCtrl = TextEditingController(text: 'Habitacion 12');
+  final _roomCtrl = TextEditingController(text: '${'example_room'.tr()}');
   final _manualSsidCtrl = TextEditingController();
 
   bool _obscurePassword = true;
-  String _status = 'Sin conectar';
+  String _status = '${'no_connexion'.tr()}';
   bool _sending = false;
   bool _awaiting = false;
   bool _success = false;
@@ -73,17 +74,17 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
   }
 
   Future<void> _scanNetworks() async {
-    setState(() { _scanning = true; _status = 'Buscando redes...'; });
+    setState(() { _scanning = true; _status = '${'webs'.tr()}...'; });
 
     final status = await Permission.locationWhenInUse.request();
     if (!status.isGranted) {
-      setState(() { _scanning = false; _status = 'Permiso de ubicación necesario para buscar redes'; _manualEntry = true; });
+      setState(() { _scanning = false; _status = '${'perm_ubi'.tr()}'; _manualEntry = true; });
       return;
     }
 
     final can = await WiFiScan.instance.canStartScan();
     if (can != CanStartScan.yes) {
-      setState(() { _scanning = false; _status = 'No se pueden escanear redes en este dispositivo'; _manualEntry = true; });
+      setState(() { _scanning = false; _status = '${'webs_err'.tr()}'; _manualEntry = true; });
       return;
     }
 
@@ -96,7 +97,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
       ..sort((a, b) => b.level.compareTo(a.level));
 
     if (!mounted) return;
-    setState(() { _networks = networks; _scanning = false; _status = 'Sin conectar'; });
+    setState(() { _networks = networks; _scanning = false; _status = '${'no_connexion'}'; });
   }
 
   IconData _wifiIcon(int level) {
@@ -133,7 +134,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
   Future<void> _sendCredentials() async {
     final ssid = _manualEntry ? _manualSsidCtrl.text.trim() : (_selectedSsid ?? '');
     if (ssid.isEmpty) {
-      _setStatus('Selecciona o introduce una red WiFi');
+      _setStatus('${'wifi'.tr()}');
       return;
     }
 
@@ -145,7 +146,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
     });
     final bytes = utf8.encode(payload);
 
-    setState(() { _sending = true; _awaiting = false; _status = 'Conectando por BLE...'; });
+    setState(() { _sending = true; _awaiting = false; _status = '${'con_ble'.tr()}...'; });
 
     try {
       // --- 1. Conectar y esperar estado "connected" real.
@@ -164,7 +165,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
       }
 
       // --- 2. Descubrir servicios ANTES de tocar el MTU.
-      _setStatus('Descubriendo servicios...');
+      _setStatus('${'desc_serv'.tr()}...');
       final services = await widget.device.discoverServices();
 
       BluetoothCharacteristic? txChar;
@@ -177,14 +178,14 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
       }
 
       if (txChar == null) {
-        _setStatus('Error: característica TX no encontrada en el dispositivo');
+        _setStatus('Error: ${'err_tx'.tr()}');
         setState(() => _sending = false);
         return;
       }
 
       // --- 3. Negociar MTU y esperar confirmación.
       if (Platform.isAndroid && widget.device.mtuNow - 3 < bytes.length) {
-        _setStatus('Negociando tamaño de paquete...');
+        _setStatus('${'negociant'.tr()}...');
         try {
           await widget.device.requestMtu(517);
         } catch (_) {}
@@ -194,8 +195,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
       final maxWrite = widget.device.mtuNow - 3;
       if (maxWrite < bytes.length) {
         _setStatus(
-          'Error: el paquete ocupa ${bytes.length} B y el MTU negociado solo '
-          'permite $maxWrite B. El firmware debe aceptar un MTU mayor.',
+          'Error: ${'err_MTU1'.tr()} ${bytes.length} B ${'err_MTU2'.tr()} $maxWrite B. ${'err_MTU3'.tr()}',
         );
         setState(() => _sending = false);
         return;
@@ -210,26 +210,25 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
         _statusSub = statusChar.onValueReceived.listen((value) {
           if (!mounted) return;
           final text = utf8.decode(value, allowMalformed: true);
-          _setStatus('Dispositivo: $text');
+          _setStatus('${'dev_sing'.tr()}: $text');
 
           if (text.contains('"state":"connected"') || text.contains('"state": "connected"')) {
             _finishSuccess(via: 'BLE');
           } else if (text.contains('wifi_failed') || text.contains('"state":"failed"')) {
-            _abortWait('El dispositivo no ha podido conectar a la red. '
-                'Revisa el nombre de red y la contraseña.');
+            _abortWait('${'err_wifi'.tr()}');
           }
         });
       }
 
       // --- 5. Escribir.
-      _setStatus('Enviando credenciales...');
+      _setStatus('${'snd_cred'.tr()}...');
       await _writeWithRetry(txChar, bytes);
 
       // --- 6. Entrar en espera de confirmación. El botón NO se reactiva.
       _beginWait();
     } on TimeoutException {
       await _cleanupConnection();
-      _setStatus('Error: el dispositivo no respondió a tiempo. Acércalo e inténtalo de nuevo.');
+      _setStatus('Error: ${'err_close'.tr()}.');
       if (mounted) setState(() => _sending = false);
     } catch (e) {
       await _cleanupConnection();
@@ -269,13 +268,13 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
       setState(() => _elapsed++);
 
       if (_elapsed <= 3) {
-        _setStatus('Credenciales enviadas. Esperando confirmación...');
+        _setStatus('${'wait_conf'.tr()}...');
       }
 
       if (_elapsed >= _confirmationTimeout.inSeconds) {
         _abortWait(
-          'Sin confirmación tras ${_confirmationTimeout.inSeconds} s. '
-          'Comprueba que el dispositivo tiene cobertura WiFi y que la contraseña es correcta.',
+          '${'err_conf1'.tr()} ${_confirmationTimeout.inSeconds} s. '
+          '${'err_conf2'.tr()}',
         );
       }
     });
@@ -346,13 +345,13 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
             children: [
               const Icon(Icons.check_circle, color: AppColors.statusSuccess, size: 48),
               const SizedBox(height: 16),
-              Text('Dispositivo conectado con éxito', textAlign: TextAlign.center, style: Theme.of(ctx).textTheme.titleMedium),
+              Text('${'success'.tr()}', textAlign: TextAlign.center, style: Theme.of(ctx).textTheme.titleMedium),
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Aceptar'),
+              child: Text('accept'.tr()),
             ),
           ],
         ),
@@ -386,10 +385,10 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          Text('Configurar red WiFi', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
+          Text('${'conf_wifi'.tr()}', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 8),
           Text(
-            'El dispositivo necesita acceso a tu red WiFi para transmitir alertas en tiempo real.',
+            '${'err_conf_wifi'.tr()}',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
           ),
@@ -399,7 +398,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Redes disponibles', style: Theme.of(context).textTheme.titleMedium),
+                Text('${'redes_disp'.tr()}', style: Theme.of(context).textTheme.titleMedium),
                 IconButton(
                   icon: _scanning
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
@@ -423,7 +422,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
             Center(
               child: TextButton(
                 onPressed: () => setState(() => _manualEntry = true),
-                child: const Text('Introducir red manualmente'),
+                child: Text('${'red_man'.tr()}'),
               ),
             ),
           ] else ...[
@@ -431,12 +430,12 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
               color: AppColors.surfaceContainer,
               child: ListTile(
                 leading: const Icon(Icons.wifi, color: AppColors.primary),
-                title: Text(_manualEntry ? 'Red manual' : _selectedSsid!),
+                title: Text(_manualEntry ? '${'red_man2'.tr()}' : _selectedSsid!),
                 trailing: TextButton(
                   onPressed: _awaiting
                       ? null
                       : () => setState(() { _selectedSsid = null; _manualEntry = false; }),
-                  child: const Text('Cambiar'),
+                  child: Text('${'chng'.tr()}'),
                 ),
               ),
             ),
@@ -447,7 +446,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
                 child: TextField(
                   controller: _manualSsidCtrl,
                   enabled: !_awaiting,
-                  decoration: const InputDecoration(labelText: 'Nombre de la red (SSID)', prefixIcon: Icon(Icons.wifi)),
+                  decoration: InputDecoration(labelText: '${'nom_red'.tr()} (SSID)', prefixIcon: Icon(Icons.wifi)),
                 ),
               ),
             TextField(
@@ -455,7 +454,7 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
               enabled: !_awaiting,
               obscureText: _obscurePassword,
               decoration: InputDecoration(
-                labelText: 'Contraseña',
+                labelText: '${'psw'.tr()}',
                 prefixIcon: const Icon(Icons.lock_outline),
                 suffixIcon: IconButton(
                   icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
@@ -477,8 +476,8 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
                   : Icon(_success ? Icons.check_circle : Icons.sensors),
               label: Text(
                 _success
-                    ? '¡Conectado!'
-                    : (_awaiting ? 'Esperando al dispositivo… ${remaining}s' : 'Conectar dispositivo'),
+                    ? '¡${'connected'.tr()}!'
+                    : (_awaiting ? '${'wait_dev'.tr()}… ${remaining}s' : '${'con_dev'.tr()}'),
               ),
             ),
             if (_awaiting) ...[
@@ -495,8 +494,8 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'El dispositivo puede tardar hasta un minuto en conectar a la red. '
-                        'No cierres esta pantalla.',
+                        '${'err_1min'.tr()} '
+                        '${'no_close'.tr()}.',
                         style: Theme.of(context).textTheme.labelSmall,
                       ),
                     ),

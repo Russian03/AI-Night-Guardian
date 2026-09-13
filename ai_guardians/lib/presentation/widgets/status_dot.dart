@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/mqtt_service.dart';
 import '../../theme/app_theme.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 /// Estado visual de un dispositivo.
 enum DeviceStatus { ok, stale, alert }
@@ -42,11 +43,11 @@ Color statusSurface(DeviceStatus s) {
 String statusLabel(DeviceStatus s) {
   switch (s) {
     case DeviceStatus.ok:
-      return 'Estable';
+      return '${'est'.tr()}';
     case DeviceStatus.stale:
-      return 'Sin señal';
+      return '${'nsign'.tr()}';
     case DeviceStatus.alert:
-      return 'Atención';
+      return '${'att'.tr()}';
   }
 }
 
