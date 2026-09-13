@@ -340,18 +340,18 @@ class _LiveDeviceCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    event?['event_type'] ?? 'unknown'.tr(),
+                    (event?['event_type'] as String).tr() ?? 'unknown'.tr(),
                     style: Theme.of(ctx).textTheme.titleMedium,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Text('Habitación: ${event?['room'] ?? device.roomName}'),
+            Text('${'hab'.tr()}: ${event?['room'] ?? device.roomName}'),
             if (event?['confidence'] != null)
-              Text('Confianza: ${((event!['confidence'] as num) * 100).toStringAsFixed(0)}%'),
+              Text('${'confi_may'.tr()}: ${((event!['confidence'] as num) * 100).toStringAsFixed(0)}%'),
             if (time != null)
-              Text('Hora: ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}'),
+              Text('${'hora_time'.tr()}: ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}'),
           ],
         ),
         actions: [

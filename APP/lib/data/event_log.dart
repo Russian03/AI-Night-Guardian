@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 /// Un evento recibido por MQTT, guardado en el historial local.
 /// Solo metadatos: nunca audio (privacidad por diseño).
@@ -25,7 +26,7 @@ class LoggedEvent {
 
   factory LoggedEvent.fromJson(Map<String, dynamic> json) => LoggedEvent(
         deviceId: json['deviceId'] as String,
-        eventType: json['eventType'] as String? ?? 'desconocido',
+        eventType: json['eventType'].tr() as String? ?? 'unknown'.tr(),
         confidence: (json['confidence'] as num?)?.toDouble() ?? 0.0,
         at: DateTime.parse(json['at'] as String),
       );

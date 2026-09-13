@@ -177,5 +177,8 @@
   "hab_name": "Nom de l'habitacio",
   "impacte": "Caiguda",
   "veu_angoixa": "Veus",
-  "tos": "Tos persistent"
+  "tos": "Tos persistent",
+  "hab": "Habitacio",
+  "confi_may": "Confiança",
+  "hora_time": "Hora"
 }
