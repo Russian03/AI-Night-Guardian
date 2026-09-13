@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:wifi_scan/wifi_scan.dart';
@@ -23,6 +25,10 @@ class WifiProvisionScreen extends StatefulWidget {
 }
 
 class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
+  /// Margen para que el Arduino conecte al WiFi: 20 s de timeout por intento
+  /// x 3 reintentos, más holgura.
+  static const _confirmationTimeout = Duration(seconds: 90);
+
   final _passCtrl = TextEditingController();
   final _roomCtrl = TextEditingController(text: 'Habitacion 12');
   final _manualSsidCtrl = TextEditingController();
@@ -30,12 +36,19 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
   bool _obscurePassword = true;
   String _status = 'Sin conectar';
   bool _sending = false;
+  bool _awaiting = false;
   bool _success = false;
+  int _elapsed = 0;
 
   List<WiFiAccessPoint> _networks = [];
   String? _selectedSsid;
   bool _scanning = false;
   bool _manualEntry = false;
+
+  StreamSubscription<List<int>>? _statusSub;
+  StreamSubscription<BluetoothConnectionState>? _connSub;
+  StreamSubscription<DeviceMessage>? _mqttSub;
+  Timer? _countdown;
 
   @override
   void initState() {
@@ -45,10 +58,18 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
 
   @override
   void dispose() {
+    _statusSub?.cancel();
+    _connSub?.cancel();
+    _mqttSub?.cancel();
+    _countdown?.cancel();
     _passCtrl.dispose();
     _roomCtrl.dispose();
     _manualSsidCtrl.dispose();
     super.dispose();
+  }
+
+  void _setStatus(String s) {
+    if (mounted) setState(() => _status = s);
   }
 
   Future<void> _scanNetworks() async {
@@ -88,17 +109,66 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
     setState(() { _selectedSsid = ssid; _manualEntry = false; });
   }
 
+  // ---------------------------------------------------------------------------
+  // Provisioning BLE
+  // ---------------------------------------------------------------------------
+
+  Future<void> _writeWithRetry(
+    BluetoothCharacteristic c,
+    List<int> data, {
+    int attempts = 3,
+  }) async {
+    for (var i = 0; i < attempts; i++) {
+      try {
+        await c.write(data, withoutResponse: false);
+        return;
+      } catch (e) {
+        if (i == attempts - 1) rethrow;
+        _setStatus('Reintentando envío (${i + 2}/$attempts)...');
+        await Future.delayed(Duration(milliseconds: 400 * (i + 1)));
+      }
+    }
+  }
+
   Future<void> _sendCredentials() async {
-    setState(() { _sending = true; _status = 'Conectando por BLE...'; });
+    final ssid = _manualEntry ? _manualSsidCtrl.text.trim() : (_selectedSsid ?? '');
+    if (ssid.isEmpty) {
+      _setStatus('Selecciona o introduce una red WiFi');
+      return;
+    }
+
+    final payload = jsonEncode({
+      "type": "wifi_provision",
+      "ssid": ssid,
+      "password": _passCtrl.text,
+      "room_name": _roomCtrl.text,
+    });
+    final bytes = utf8.encode(payload);
+
+    setState(() { _sending = true; _awaiting = false; _status = 'Conectando por BLE...'; });
 
     try {
-      await widget.device.connect(timeout: const Duration(seconds: 10));
-      await widget.device.requestMtu(247);
+      // --- 1. Conectar y esperar estado "connected" real.
+      if (!widget.device.isConnected) {
+        await widget.device.connect(
+          autoConnect: false,
+          timeout: const Duration(seconds: 15),
+        );
+      }
+      await widget.device.connectionState
+          .firstWhere((s) => s == BluetoothConnectionState.connected)
+          .timeout(const Duration(seconds: 15));
 
+      if (Platform.isAndroid) {
+        await Future.delayed(const Duration(milliseconds: 600));
+      }
+
+      // --- 2. Descubrir servicios ANTES de tocar el MTU.
+      _setStatus('Descubriendo servicios...');
       final services = await widget.device.discoverServices();
+
       BluetoothCharacteristic? txChar;
       BluetoothCharacteristic? statusChar;
-
       for (final s in services) {
         for (final c in s.characteristics) {
           if (c.uuid == charTxUuid) txChar = c;
@@ -107,44 +177,149 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
       }
 
       if (txChar == null) {
-        setState(() => _status = 'Error: característica TX no encontrada');
+        _setStatus('Error: característica TX no encontrada en el dispositivo');
+        setState(() => _sending = false);
         return;
       }
 
+      // --- 3. Negociar MTU y esperar confirmación.
+      if (Platform.isAndroid && widget.device.mtuNow - 3 < bytes.length) {
+        _setStatus('Negociando tamaño de paquete...');
+        try {
+          await widget.device.requestMtu(517);
+        } catch (_) {}
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      final maxWrite = widget.device.mtuNow - 3;
+      if (maxWrite < bytes.length) {
+        _setStatus(
+          'Error: el paquete ocupa ${bytes.length} B y el MTU negociado solo '
+          'permite $maxWrite B. El firmware debe aceptar un MTU mayor.',
+        );
+        setState(() => _sending = false);
+        return;
+      }
+
+      // --- 4. Suscribirse a notificaciones ANTES de escribir.
       if (statusChar != null) {
         await statusChar.setNotifyValue(true);
-        await Future.delayed(const Duration(milliseconds: 500));
-        statusChar.lastValueStream.listen((value) async {
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        await _statusSub?.cancel();
+        _statusSub = statusChar.onValueReceived.listen((value) {
+          if (!mounted) return;
           final text = utf8.decode(value, allowMalformed: true);
-          setState(() => _status = 'Arduino dice: $text');
+          _setStatus('Dispositivo: $text');
+
           if (text.contains('"state":"connected"') || text.contains('"state": "connected"')) {
-            setState(() => _success = true);
-            await DeviceStore.add(SavedDevice(
-              deviceId: widget.credentials.deviceId,
-              roomName: _roomCtrl.text,
-            ));
-            await MqttService.instance.subscribeToDevice(widget.credentials.deviceId);
-            if (!mounted) return;
-            _showSuccessAndGoHome();
+            _finishSuccess(via: 'BLE');
+          } else if (text.contains('wifi_failed') || text.contains('"state":"failed"')) {
+            _abortWait('El dispositivo no ha podido conectar a la red. '
+                'Revisa el nombre de red y la contraseña.');
           }
         });
       }
 
-      final ssid = _manualEntry ? _manualSsidCtrl.text : (_selectedSsid ?? '');
-      final payload = jsonEncode({
-        "type": "wifi_provision",
-        "ssid": ssid,
-        "password": _passCtrl.text,
-        "room_name": _roomCtrl.text,
-      });
+      // --- 5. Escribir.
+      _setStatus('Enviando credenciales...');
+      await _writeWithRetry(txChar, bytes);
 
-      await txChar.write(utf8.encode(payload), withoutResponse: false);
-      setState(() => _status = 'Credenciales enviadas, esperando confirmación...');
+      // --- 6. Entrar en espera de confirmación. El botón NO se reactiva.
+      _beginWait();
+    } on TimeoutException {
+      await _cleanupConnection();
+      _setStatus('Error: el dispositivo no respondió a tiempo. Acércalo e inténtalo de nuevo.');
+      if (mounted) setState(() => _sending = false);
     } catch (e) {
-      setState(() => _status = 'Error: $e');
-    } finally {
+      await _cleanupConnection();
+      _setStatus('Error: $e');
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  /// Espera la confirmación por dos vías simultáneas:
+  ///  a) notificación BLE del Arduino (característica STATUS),
+  ///  b) primer heartbeat MQTT de ese device_id — prueba directa de que
+  ///     el dispositivo ya está en la red aunque la notificación BLE se pierda.
+  void _beginWait() {
+    if (!mounted) return;
+    setState(() { _awaiting = true; _elapsed = 0; });
+
+    // Vía b: heartbeat MQTT.
+    MqttService.instance.subscribeToDevice(widget.credentials.deviceId);
+    _mqttSub?.cancel();
+    _mqttSub = MqttService.instance.messages.listen((msg) {
+      if (msg.deviceId == widget.credentials.deviceId && msg.type == 'heartbeat') {
+        _finishSuccess(via: 'MQTT');
+      }
+    });
+
+    // Aviso si el enlace BLE cae durante la espera (no es fatal: MQTT puede salvarlo).
+    _connSub?.cancel();
+    _connSub = widget.device.connectionState.listen((s) {
+      if (s == BluetoothConnectionState.disconnected && _awaiting && mounted) {
+        _setStatus('Enlace BLE cerrado. Esperando que el dispositivo aparezca en la red...');
+      }
+    });
+
+    _countdown?.cancel();
+    _countdown = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() => _elapsed++);
+
+      if (_elapsed <= 3) {
+        _setStatus('Credenciales enviadas. Esperando confirmación...');
+      }
+
+      if (_elapsed >= _confirmationTimeout.inSeconds) {
+        _abortWait(
+          'Sin confirmación tras ${_confirmationTimeout.inSeconds} s. '
+          'Comprueba que el dispositivo tiene cobertura WiFi y que la contraseña es correcta.',
+        );
+      }
+    });
+  }
+
+  void _abortWait(String message) {
+    _countdown?.cancel();
+    _mqttSub?.cancel();
+    _connSub?.cancel();
+    if (!mounted) return;
+    setState(() { _awaiting = false; _sending = false; });
+    _setStatus(message);
+  }
+
+  Future<void> _finishSuccess({required String via}) async {
+    if (_success || !mounted) return;
+    setState(() { _success = true; _awaiting = false; });
+
+    _countdown?.cancel();
+    await _mqttSub?.cancel();
+    await _connSub?.cancel();
+    await _statusSub?.cancel();
+
+    await DeviceStore.add(SavedDevice(
+      deviceId: widget.credentials.deviceId,
+      roomName: _roomCtrl.text,
+    ));
+    // Re-vinculación del mismo sensor: descartar heartbeats de la sesión
+    // anterior para no mostrar "en línea" con datos caducados.
+    MqttService.instance.resetDeviceState(widget.credentials.deviceId);
+    MqttService.instance.registerRoomName(widget.credentials.deviceId, _roomCtrl.text);
+    await MqttService.instance.subscribeToDevice(widget.credentials.deviceId);
+
+    if (!mounted) return;
+    _showSuccessAndGoHome();
+  }
+
+  Future<void> _cleanupConnection() async {
+    await _statusSub?.cancel();
+    _statusSub = null;
+    try {
+      await widget.device.disconnect();
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 400));
   }
 
   void _showSuccessAndGoHome() async {
@@ -185,8 +360,12 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
     });
   }
 
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
+    final remaining = _confirmationTimeout.inSeconds - _elapsed;
+
     return Scaffold(
       appBar: AppBar(backgroundColor: AppColors.bgElevated, title: const Text('Configurar red WiFi')),
       body: ListView(
@@ -254,7 +433,9 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
                 leading: const Icon(Icons.wifi, color: AppColors.primary),
                 title: Text(_manualEntry ? 'Red manual' : _selectedSsid!),
                 trailing: TextButton(
-                  onPressed: () => setState(() { _selectedSsid = null; _manualEntry = false; }),
+                  onPressed: _awaiting
+                      ? null
+                      : () => setState(() { _selectedSsid = null; _manualEntry = false; }),
                   child: const Text('Cambiar'),
                 ),
               ),
@@ -265,11 +446,13 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
                 padding: const EdgeInsets.only(bottom: 12),
                 child: TextField(
                   controller: _manualSsidCtrl,
+                  enabled: !_awaiting,
                   decoration: const InputDecoration(labelText: 'Nombre de la red (SSID)', prefixIcon: Icon(Icons.wifi)),
                 ),
               ),
             TextField(
               controller: _passCtrl,
+              enabled: !_awaiting,
               obscureText: _obscurePassword,
               decoration: InputDecoration(
                 labelText: 'Contraseña',
@@ -283,16 +466,44 @@ class _WifiProvisionScreenState extends State<WifiProvisionScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: _roomCtrl,
+              enabled: !_awaiting,
               decoration: const InputDecoration(labelText: 'Nombre de la habitación', prefixIcon: Icon(Icons.bed_outlined)),
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: _sending ? null : _sendCredentials,
-              icon: _sending
+              onPressed: (_sending || _awaiting) ? null : _sendCredentials,
+              icon: (_sending || _awaiting)
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : Icon(_success ? Icons.check_circle : Icons.sensors),
-              label: Text(_success ? '¡Conectado!' : 'Conectar dispositivo'),
+              label: Text(
+                _success
+                    ? '¡Conectado!'
+                    : (_awaiting ? 'Esperando al dispositivo… ${remaining}s' : 'Conectar dispositivo'),
+              ),
             ),
+            if (_awaiting) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.statusWarningSurface,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, size: 18, color: AppColors.statusWarning),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'El dispositivo puede tardar hasta un minuto en conectar a la red. '
+                        'No cierres esta pantalla.',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
 
           const SizedBox(height: 16),

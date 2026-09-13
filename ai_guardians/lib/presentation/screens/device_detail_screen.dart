@@ -20,6 +20,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
   StreamSubscription<DeviceMessage>? _sub;
   Timer? _timer;
   List<LoggedEvent> _recent = [];
+  bool _togglePending = false;
 
   @override
   void initState() {
@@ -33,6 +34,10 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
       if (msg.deviceId == _device.deviceId && msg.type == 'event') {
         _loadEvents();
       } else {
+        // El heartbeat confirma si el dispositivo aplicó el cambio de escucha.
+        if (msg.deviceId == _device.deviceId && msg.type == 'heartbeat') {
+          _togglePending = false;
+        }
         setState(() {});
       }
     });
@@ -58,8 +63,26 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
   }
 
   // -------------------------------------------------------------------------
-  // Acciones del menú
+  // Acciones
   // -------------------------------------------------------------------------
+
+  Future<void> _toggleListening(bool value) async {
+    if (!MqttService.instance.isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sin conexión con el broker. Inténtalo de nuevo.')),
+      );
+      return;
+    }
+
+    setState(() => _togglePending = true);
+    MqttService.instance.publishConfig(_device.deviceId, {'listening': value});
+
+    // El estado real llega en el siguiente heartbeat (hasta 5 s).
+    // Si no cambia en 15 s, se asume que el dispositivo no lo aplicó.
+    Future.delayed(const Duration(seconds: 15), () {
+      if (mounted && _togglePending) setState(() => _togglePending = false);
+    });
+  }
 
   Future<void> _rename() async {
     final controller = TextEditingController(text: _device.roomName);
@@ -91,6 +114,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
 
     if (newName == null || newName.isEmpty || newName == _device.roomName) return;
     await DeviceStore.rename(_device.deviceId, newName);
+    MqttService.instance.registerRoomName(_device.deviceId, newName);
     if (!mounted) return;
     setState(() {
       _device = SavedDevice(deviceId: _device.deviceId, roomName: newName);
@@ -115,6 +139,10 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
             _InfoRow('Firmware', hb['fw_version']?.toString() ?? '—'),
             _InfoRow('Topic', 'residencia/${_device.deviceId}/#'),
             _InfoRow('Último heartbeat', lastSeen == null ? 'Nunca' : _clock(lastSeen)),
+            _InfoRow(
+              'Edad sensores',
+              hb['sensor_age_s'] == null ? '—' : '${hb['sensor_age_s']} s',
+            ),
             _InfoRow('Broker', MqttService.instance.isConnected ? 'Conectado' : 'Desconectado'),
           ],
         ),
@@ -151,8 +179,8 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
 
     if (confirmed != true) return;
     await DeviceStore.remove(_device.deviceId);
-    MqttService.instance.forgetDevice(_device.deviceId);
     await EventLog.instance.clearDevice(_device.deviceId);
+    MqttService.instance.forgetDevice(_device.deviceId);
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
@@ -178,6 +206,13 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
                   if (status == DeviceStatus.stale) _offlineBanner(),
                   const SizedBox(height: 16),
                   _metricsGrid(hb),
+                  const SizedBox(height: 16),
+                  _ListeningCard(
+                    listening: hb?['listening'] != false,
+                    pending: _togglePending,
+                    enabled: status != DeviceStatus.stale,
+                    onChanged: _toggleListening,
+                  ),
                   const SizedBox(height: 24),
                   _activitySection(),
                 ],
@@ -359,7 +394,7 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
                   style: const TextStyle(fontSize: 15, color: AppColors.textPrimary),
                 ),
                 const SizedBox(height: 14),
-                                ElevatedButton.icon(
+                ElevatedButton.icon(
                   onPressed: () {
                     MqttService.instance.markIncidentHandled(_device.deviceId);
                     setState(() {});
@@ -441,7 +476,9 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
           iconColor: AppColors.primary,
           value: temp == null ? '—' : temp.toStringAsFixed(1),
           unit: '°C',
-          caption: 'Temperatura ambiente',
+          caption: hb?['temp_c_stale'] == true
+              ? 'Última lectura válida'
+              : 'Temperatura ambiente',
         ),
         _MetricCard(
           label: 'Luminosidad',
@@ -449,7 +486,9 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
           iconColor: AppColors.statusWarning,
           value: lux?.toString() ?? '—',
           unit: 'lux',
-          caption: lux == null ? 'Sin lectura' : (lux < 10 ? 'Oscuridad' : 'Luz encendida'),
+          caption: hb?['lux_stale'] == true
+              ? 'Última lectura válida'
+              : (lux == null ? 'Sin lectura' : (lux < 10 ? 'Oscuridad' : 'Luz encendida')),
         ),
         _MetricCard(
           label: 'Actividad',
@@ -523,8 +562,89 @@ class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-widgets y helpers
+// Sub-widgets
 // ---------------------------------------------------------------------------
+
+class _ListeningCard extends StatelessWidget {
+  final bool listening;
+  final bool pending;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _ListeningCard({
+    required this.listening,
+    required this.pending,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceCard,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: listening
+                  ? AppColors.primaryContainer.withOpacity(0.2)
+                  : AppColors.surfaceContainerHigh,
+            ),
+            child: Icon(
+              listening ? Icons.graphic_eq : Icons.mic_off,
+              size: 22,
+              color: listening ? AppColors.primary : AppColors.textTertiary,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Modo escucha acústica',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  pending
+                      ? 'Aplicando cambio en el dispositivo…'
+                      : (listening
+                          ? 'Detectando tos, caídas y voces de angustia'
+                          : 'Micrófono e IA detenidos. No se detectarán incidencias.'),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: (!listening && !pending) ? AppColors.statusWarning : null,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (pending)
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Switch.adaptive(
+              value: listening,
+              activeColor: AppColors.primaryContainer,
+              onChanged: enabled ? onChanged : null,
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class _MetricCard extends StatelessWidget {
   final String label;
@@ -686,7 +806,7 @@ class _InfoRow extends StatelessWidget {
 
 // --- Taxonomía de eventos -------------------------------------------------
 // Los event_type se normalizan y se mapean a una categoría canónica, así que
-// da igual si el firmware publica "caida", "caiguda", "Caída" o "fall".
+// da igual si el firmware publica "caida", "caiguda", "Caída" o "impacte".
 
 /// Quita acentos, pasa a minúsculas y unifica separadores.
 String _normalizeType(String type) {
@@ -700,15 +820,14 @@ String _normalizeType(String type) {
   return buf.toString().replaceAll(RegExp(r'[\s\-\.]+'), '_');
 }
 
-/// Categoría canónica del evento.
-/// Devuelve '' si no se reconoce (entonces se muestra el string crudo).
+/// Categoría canónica del evento. Devuelve '' si no se reconoce.
 String _canonType(String type) {
   final t = _normalizeType(type);
 
   const groups = <String, List<String>>{
     'fall': [
       'caida', 'caida_detectada', 'caiguda', 'cop', 'cops', 'golpe',
-      'impacto', 'impact', 'fall', 'thump', 'thud', 'bang',
+      'impacte', 'impacto', 'impact', 'fall', 'thump', 'thud', 'bang',
     ],
     'cough': [
       'tos', 'tos_persistente', 'tos_persistent', 'cough', 'coughing',
@@ -717,7 +836,8 @@ String _canonType(String type) {
       'grito', 'gritos', 'crit', 'crits', 'scream', 'screaming', 'shout',
       'auxilio', 'socorro', 'help', 'ayuda',
       'angustia', 'voces_angustia', 'voces_de_angustia', 'voz_angustia',
-      'veus_angoixa', 'distress', 'distress_voice', 'groan', 'quejido',
+      'veu_angoixa', 'veus_angoixa', 'distress', 'distress_voice',
+      'groan', 'quejido',
     ],
     'cry': [
       'plor', 'plors', 'llanto', 'cry', 'crying', 'sob', 'sobbing',
@@ -727,7 +847,7 @@ String _canonType(String type) {
     ],
     'silence': [
       'silencio_anomal', 'silencio_anomalo', 'silenci_anomal', 'silencio',
-      'silence', 'anomalous_silence',
+      'silenci', 'silence', 'anomalous_silence',
     ],
     'light': [
       'luz_encesa', 'luz_encendida', 'llum', 'luz', 'light', 'light_change',
@@ -745,7 +865,7 @@ String _canonType(String type) {
   return '';
 }
 
-/// Formatea un event_type desconocido de forma legible: "voces_angustia" -> "Voces angustia".
+/// Formatea un event_type desconocido de forma legible.
 String _prettyRaw(String type) {
   final s = type.replaceAll(RegExp(r'[_\-]+'), ' ').trim();
   if (s.isEmpty) return 'Evento sin identificar';

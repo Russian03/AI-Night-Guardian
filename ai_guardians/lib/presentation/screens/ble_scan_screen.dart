@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -18,7 +19,9 @@ class BleScanScreen extends StatefulWidget {
 class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProviderStateMixin {
   final List<ScanResult> _results = [];
   bool _scanning = false;
+  bool _connecting = false;
   late final AnimationController _pulseController;
+  StreamSubscription<List<ScanResult>>? _scanSub;
 
   @override
   void initState() {
@@ -34,12 +37,15 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
       Permission.locationWhenInUse,
     ].request();
 
+    if (!mounted) return;
     setState(() {
       _scanning = true;
       _results.clear();
     });
 
-    FlutterBluePlus.scanResults.listen((results) {
+    // Una sola suscripción viva: reiniciar el escaneo no debe apilar listeners.
+    await _scanSub?.cancel();
+    _scanSub = FlutterBluePlus.scanResults.listen((results) {
       if (!mounted) return;
       setState(() {
         _results
@@ -64,9 +70,17 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
   }
 
   Future<void> _selectDevice(ScanResult r) async {
+    if (_connecting) return;
+    setState(() => _connecting = true);
+
     // Imprescindible: parar el escaneo antes de conectar. Escanear y
     // conectar a la vez es una causa común de GATT_UNLIKELY en Android.
+    await _scanSub?.cancel();
+    _scanSub = null;
     await FlutterBluePlus.stopScan();
+
+    // El radio no queda libre de inmediato tras stopScan().
+    await Future.delayed(const Duration(milliseconds: 500));
 
     if (!mounted) return;
     await Navigator.of(context).push(
@@ -77,10 +91,13 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
         ),
       ),
     );
+
+    if (mounted) setState(() => _connecting = false);
   }
 
   @override
   void dispose() {
+    _scanSub?.cancel();
     FlutterBluePlus.stopScan();
     _pulseController.dispose();
     super.dispose();
@@ -159,7 +176,7 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
           if (!_scanning) ...[
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: _startScan,
+              onPressed: _connecting ? null : _startScan,
               icon: const Icon(Icons.sync),
               label: const Text('Reintentar búsqueda'),
             ),
