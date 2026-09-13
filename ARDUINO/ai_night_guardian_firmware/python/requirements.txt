@@ -1,3 +1,0 @@
-qrcode[pil]
-paho-mqtt
-edge-impulse-linux
