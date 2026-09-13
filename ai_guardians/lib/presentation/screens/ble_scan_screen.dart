@@ -152,7 +152,7 @@ class _BleScanScreenState extends State<BleScanScreen> with SingleTickerProvider
                 Text('${'scanning'.tr()}', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
                 Text(
-                  '${'searching'.tr()} ${widget.credentials.deviceId} ${'nearby'}.tr()...',
+                  '${'searching'.tr()} ${widget.credentials.deviceId} ${'nearby'.tr()}...',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
                 ),
               ],

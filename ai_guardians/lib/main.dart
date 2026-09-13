@@ -17,9 +17,10 @@ void main() async {
   }
   runApp(
     EasyLocalization(
-      supportedLocales: const [Locale('es'), Locale('ca'), Locale('en')],
+      supportedLocales: const [Locale('en'), Locale('es'), Locale('ca')],
       path: 'assets/translations',
       fallbackLocale: const Locale('en'),
+      startLocale: const Locale('en'),
       child: const AiNightGuardianApp(),
     ),
   );
