@@ -4,6 +4,7 @@ import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import 'event_log.dart';
 import 'notification_service.dart';
+import 'package:easy_localization/easy_localization.dart';
 
 /// Mensaje MQTT ya parseado, con el device_id de origen incluido.
 class DeviceMessage {
@@ -154,17 +155,19 @@ class MqttService {
           _lastEventTimes[deviceId] = now;
           _activeIncidents.add(deviceId);
 
+          final rawEvent = data['event_type'] as String? ?? 'unknown'.tr();
+
           EventLog.instance.add(LoggedEvent(
             deviceId: deviceId,
-            eventType: data['event_type'] as String? ?? 'desconocido',
+            eventType: rawEvent.tr(),
             confidence: (data['confidence'] as num?)?.toDouble() ?? 0.0,
             at: now,
           ));
 
           _controller.add(DeviceMessage(deviceId: deviceId, type: 'event', payload: data));
           NotificationService.showEventAlert(
-            room: data['room'] ?? 'Desconocida',
-            eventType: data['event_type'] ?? 'desconocido',
+            room: data['room'] ?? 'unknown'.tr(),
+            eventType: rawEvent.tr(),
             confidence: (data['confidence'] as num?)?.toDouble() ?? 0.0,
           );
         }

@@ -174,5 +174,8 @@
   "act": "Activity",
   "cnct": "Connexion",
   "ini": "Home",
-  "hab_name": "Room's name"
+  "hab_name": "Room's name",
+  "impacte": "Fall",
+  "veu_angoixa": "Voices",
+  "tos": "Persistent cough"
 }

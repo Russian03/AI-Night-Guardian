@@ -174,5 +174,8 @@
   "act": "Actividad",
   "cnct": "Conexion",
   "ini": "Inicio",
-  "hab_name": "Nombre de la habitacion"
+  "hab_name": "Nombre de la habitacion",
+  "impacte": "Caida",
+  "veu_angoixa": "Voces",
+  "tos": "Tos persistente"
 }
