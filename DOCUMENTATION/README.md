@@ -1,396 +1,295 @@
+# AI Night Guardian — Reproduction Guide
 
+Complete guide to build the system from scratch: 3D-printed parts, Arduino UNO Q firmware and mobile app.
 
-## 1. The problem
-
-In care homes, night staff work by rounds: they walk into each room to
-check that the resident is all right. Depending on the facility, a given
-room gets a visit roughly once an hour.
-
-That means there is up to an hour in which nobody knows what is happening
-inside a room. If someone falls, if someone is in distress, it gets noticed
-on the next round — not when it happens.
-
-The obvious technical fix is a camera or an always-on microphone. But these
-are people's bedrooms, and continuous recording in a resident's room is not
-something anyone should accept. Any system that goes in there has to work
-without keeping the audio.
-
-## 2. The solution
-
-**AI Night Guardian** is a device built on an Arduino UNO Q that runs a
-neural network **locally** to classify sounds inside a room. It doesn't
-replace the rounds — it covers the time between them.
-
-The model distinguishes five kinds of sound, chosen so that each one maps
-to a different action:
-
-| Class | What it covers | Device action |
-|---|---|---|
-| `impacte` | Impacts, falls, doors | Alert — possible incident |
-| `veu_angoixa` | Screaming, crying, distress | Alert — immediate attention |
-| `tos` | Coughing fits | Alert — low priority |
-| `normal` | Speech, snoring, rain, traffic, alarms | Nothing |
-| `silenci` | A quiet room | Nothing |
-
-When it detects an incident, the device records the time and the type and
-publishes a notification to the staff's mobile app, so carers can
-prioritise the rooms that actually need attention.
-
-**Additional, non-acoustic alerts:**
-
-- **Ambient light changes** (lights switched on or off) via the Modulino light sensor.
-- **Temperature outside a configurable range** (e.g. `[20 °C, 30 °C]`), particularly relevant during heatwaves.
-
-Because it is a **low-cost system with local processing**, it can be
-deployed in care homes, assisted-living facilities and even in the homes of
-older people living alone.
-
-## 3. Privacy by design
-
-This is the core constraint of the project and the reason it is legally
-deployable in a care home under GDPR.
-
-- **No personal or biometric data is processed or stored.**
-- The room's acoustic signal is captured **straight into memory**.
-- Once the neural network has run inference, the **audio window is immediately and irreversibly discarded**, having never been written anywhere.
-- The device **does not transmit audio** outside the room.
-- The only thing that leaves the device is **text metadata**:
-
-```
-Room 14 — 02:40 — impact detected
-```
-
-Legally, the system behaves as an **automated emergency sensor**, not as a
-listening microphone.
-
-The app also includes a per-room **listening switch**, which lets staff
-pause inference at any time from their phone (MQTT `config` topic, see §11).
-
-## 4. Architecture
-
-```
-┌──────────────────────────────── ROOM ───────────────────────────────────┐
-│                                                                         │
-│   USB-C microphone ──► Arduino UNO Q                                    │
-│                        ├── sketch.ino  (Zephyr / MCU)                   │
-│                        │    · reads Modulino: temperature, light        │
-│                        │    · exposes read_sensors() via RouterBridge   │
-│                        │                                                 │
-│                        └── Python (Linux side of the UNO Q)             │
-│                             · device_identity.py → device_id + QR        │
-│                             · ble_peripheral.py  → WiFi provisioning     │
-│                             · mqtt_publisher.py  → heartbeat every 15 s  │
-│                             · config_listener.py → commands from the app │
-│                             · main.py            → Edge Impulse™ inference│
-└──────────────────────────────────┬──────────────────────────────────────┘
-                                   │  MQTT / TCP 1883
-                                   │  residencia/<device_id>/{heartbeat,eventos,config}
-                                   ▼
-                        ┌────────────────────────┐
-                        │  Mobile app (Flutter)  │
-                        │  · QR + BLE onboarding │
-                        │  · per-room dashboard  │
-                        │  · push notifications  │
-                        └────────────────────────┘
-```
-
-**Incident flow:** microphone → 1 s window in RAM → Mel-filterbank energies
-→ **audio window discarded** → inference → if the energy gate, the
-confidence threshold and the refractory period all pass, a JSON text
-message is published over MQTT → notification on the staff phone.
-
-## 5. Hardware
-
-| Component | Notes |
-|---|---|
-| **Arduino UNO Q** (4 GB) | Main board; runs Linux (Cortex-A) alongside a Zephyr MCU |
-| **T'nB Influence Lapel Microphone USB-C** | Audio capture |
-| **USB-C hub** | Connects microphone and power to the board |
-| **Modulino Thermo** | Room temperature |
-| **Modulino Light** | Ambient light level |
-| **3D printed enclosure** | Custom; STL in this repository |
-
-## 6. Repository layout
-
-```
-AI-Night-Guardian/
-├── ai_night_guardian_firmware/        # Everything that runs on the device
-│   ├── sketch/
-│   │   ├── sketch.ino                 # MCU: Modulino sensors + RouterBridge
-│   │   ├── sketch.yaml                # Build profile (arduino:zephyr)
-│   │   └── libraries/
-│   ├── ai_night_guardian/             # Python layer (UNO Q Linux side)
-│   │   ├── main.py                    # Inference loop: VAD, thresholds, MQTT
-│   │   ├── device_identity.py         # device_id, provisioning_key, QR
-│   │   ├── ble_peripheral.py          # GATT for WiFi provisioning
-│   │   ├── mqtt_publisher.py          # Heartbeat with sensor data
-│   │   └── config_listener.py         # Receives {"listening": bool}
-│   └── app.yaml
-│
-├── ai_guardians/                      # Flutter mobile app
-│   └── lib/
-│       ├── data/                      # mqtt_service, notification_service
-│       ├── domain/
-│       └── presentation/screens/
-│
-├── model/                             # Audio model — see model/README.md
-│   ├── README.md                      # Pipeline docs + design rationale
-│   ├── build_manifest.py              # Labels, dedup, corrupt files, caps
-│   ├── materialize_dataset.py         # Manifest -> one folder per class
-│   ├── segment_events.py              # Energy-based segmentation
-│   ├── yamnet_clean.py                # Semantic segmentation with YAMNet
-│   ├── augment_gain.py                # Random gain, level invariance
-│   └── prepare_room_audio.py          # Silence class from a real room
-│
-├── Creació dataset/                   # Extraction from the source datasets
-├── dataset_final_16khz/               # 30,487 .wav samples at 16 kHz mono
-├── enclosure/                         # 3D printable enclosure (STL)
-├── DATASET INFO.pdf                   # Source datasets and extraction method
-└── README.md
-```
-
-## 7. The dataset
-
-`dataset_final_16khz/` holds **30,487** `.wav` samples, all normalised to
-**16 kHz mono**. File names follow the pattern `<class>_<source>_<id>.wav`.
-
-### Sources
-
-| Dataset | Samples | Origin |
-|---|---|---|
-| [AudioSet](https://research.google.com/audioset/) (Google) | 10,463 | 10 s clips from YouTube |
-| [FSD50K](https://zenodo.org/records/4060432) (UPF) | 13,642 | Zenodo |
-| [COUGHVID](https://zenodo.org/records/4048312) | 5,902 | Zenodo — verified coughing |
-| [ESC-50](https://github.com/karolpiczak/ESC-50) | 480 | GitHub |
-| **Total** | **30,487** | |
-
-Extraction methodology is documented in **[`DATASET INFO.pdf`](DATASET%20INFO.pdf)**,
-and the extraction scripts are in [`Creació dataset/`](Creaci%C3%B3%20dataset/).
-
-### Why 16 kHz mono
-
-- **16 kHz** is the TinyML standard. By Nyquist it captures up to 8 kHz, and
-  human voice, snoring and impacts carry practically all their acoustic
-  information below 4 kHz. Using 44.1 kHz would only add useless high
-  frequencies and triple the file size.
-- **Mono** because the model doesn't need to know which side the sound came
-  from, only whether it happened and what it was.
-
-### Processing pipeline
-
-The raw collection is not usable as-is. The scripts in
-[`model/`](model/) turn it into the training set; each step is documented
-in [`model/README.md`](model/README.md).
-
-Cleaning found substantial problems in the raw data:
-
-| | |
-|---|---|
-| Exact duplicates (MD5) | 2,634 |
-| Corrupt files (0.0 s) | 2,621 |
-| Clips shorter than 1 s | 1,540 |
-
-Almost 17% of the collection was unusable before training started.
-
-## 8. The model
-
-Full detail — pipeline, design decisions, every iteration and its numbers —
-is in **[`model/README.md`](model/README.md)**. Summary:
-
-**Preprocessing:** Mel-filterbank energies (MFE) over 1-second windows with
-a 500 ms stride, 40 filters, 256-point FFT.
-
-**Network:** MobileNetV2 transfer learning (Edge Impulse™ keyword-spotting
-block), deployed as an `.eim` binary on the Linux side of the UNO Q at
-**10 ms latency and 177 kB of RAM**.
-
-**What actually moved the needle** was the data, not the network:
-
-| Iteration | Accuracy | Change |
-|---|---|---|
-| 1 | 46.1% | 10 classes |
-| 2 | 53.3% | 8 classes |
-| 3 | 60.7% | 4 classes, transfer learning |
-| 4 | 64.4% | More data on critical classes |
-| 5 | 75.5% | YAMNet label cleaning |
-| 6 | **76.8%** | Silence class |
-| 7 | 73.7% | Gain augmentation |
-
-Two findings worth highlighting:
-
-**31% of the screaming clips contained no screaming.** FSD50K and AudioSet
-use weak labels — the tag means the sound appears somewhere in a ten-second
-clip, not that it fills it. Filtering the collection through YAMNet, which
-classifies 521 sound types every 0.48 s, and keeping only confirmed
-fragments took accuracy from 64% to 75% **on less data**.
-
-**The deployed system runs 30 dB below the training clips.** The MFE block
-is not level-invariant, and the same event reads −33 or −47 dBFS depending
-on distance to the microphone. Rather than matching a level, the model is
-trained with random gains so it cannot rely on absolute volume.
-
-Note the last row: gain augmentation **lowers the score and improves the
-system**. On the real device the previous version raised occasional impact
-alerts during ordinary conversation; this one does not. The validation set
-cannot see the difference, because the problem it solves only exists
-outside the lab.
-
-## 9. On-device decision logic
-
-The classifier runs twice a second — tens of thousands of inferences per
-room per night. Even a small false-positive rate becomes an unusable number
-of notifications, so three filters sit between the model and the phone:
-
-**Energy gate (VAD).** If the RMS of the window is below a calibrated
-floor, the model is not called at all. Silence never reaches the
-classifier, and the board saves the compute.
-
-**Per-class confidence thresholds.** The model is less confident on
-distress than on impacts, so a single global threshold either misses
-screams or floods on impacts.
-
-**Per-class refractory period.** After an alert for a class, further alerts
-for that class are suppressed for a configurable window. One cough during a
-coughing fit is worth a notification; eighty are not.
-
-All three are configured at the top of
-[`main.py`](ai_night_guardian_firmware/ai_night_guardian/main.py).
-
-### Calibrating a new room
-
-Record ~15 minutes of the room with no incidents and run:
-
-```bash
-python model/prepare_room_audio.py recording.wav silenci
-```
-
-It reports the RMS levels of the room, which set the energy gate, and
-produces 2-second clips that can be added as the `silenci` class for a
-room-specific retrain. This takes minutes and is what adapts the system to
-a new environment.
-
-## 10. Running it
-
-### 10.1 Device
-
-**Requirements:** Arduino CLI with the `arduino:zephyr` platform, Python
-3.11+ on the board's Linux side, `nmcli` (NetworkManager) and BlueZ.
-
-```bash
-pip install numpy paho-mqtt qrcode[pil] bluezero
-
-# 1) Build and upload the sketch to the MCU (Modulino + Bridge)
-cd ai_night_guardian_firmware/sketch
-arduino-cli compile --profile default . && arduino-cli upload -p <PORT> --profile default .
-
-# 2) Generate device identity and provisioning QR
-cd ../ai_night_guardian
-python3 device_identity.py
-
-# 3) WiFi provisioning over BLE
-sudo python3 ble_peripheral.py
-
-# 4) Sensor heartbeats
-python3 mqtt_publisher.py
-
-# 5) Inference loop
-python3 main.py
-```
-
-### 10.2 Mobile app
-
-**Requirements:** Flutter SDK ≥ 3.13.2.
-
-```bash
-cd ai_guardians
-flutter pub get
-flutter run          # or: flutter build apk --release
-```
-
-**Onboarding flow:** splash → *Add device* → scan the **QR** shown by the
-device (`device_id` + `provisioning_key`) → **BLE scan** → **WiFi + room
-name** form → the device connects and publishes its first heartbeat →
-**dashboard** with temperature, lux, uptime, last incident and the
-listening switch.
-
-Required permissions: Bluetooth, camera (QR), location (needed for BLE
-scanning on Android) and notifications.
-
-## 11. Communication protocols
-
-### MQTT
-
-Test broker: `broker.hivemq.com:1883`. All messages are JSON with `v`,
-`type`, `device_id`, `ts` and `payload`.
-
-| Topic | Direction | Contents |
-|---|---|---|
-| `residencia/<device_id>/heartbeat` | device → app | Liveness every 15 s |
-| `residencia/<device_id>/eventos` | device → app | Detected incident (QoS 1) |
-| `residencia/<device_id>/config` | app → device | Configuration (QoS 1) |
-
-**Event:**
-
-```json
-{
-  "v": 1, "type": "event", "device_id": "AING-9D67B1",
-  "ts": "2026-09-12T02:40:11+0200",
-  "payload": {
-    "room": "Room 14", "event_type": "impacte",
-    "confidence": 0.85, "detected_at": "2026-09-12T02:40:11+0200"
-  }
-}
-```
-
-### BLE provisioning
-
-Nordic UART style service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
-
-| Characteristic | UUID | Use |
-|---|---|---|
-| TX (write) | `…0002-…` | App sends `{"type":"wifi_provision","ssid":…,"password":…,"room_name":…}` |
-| RX (notify) | `…0003-…` | Reserved |
-| STATUS (read/notify) | `…0004-…` | `{"type":"wifi_status","state":"connecting\|connected\|failed","ip":…}` |
-
-## 12. Current status
-
-### Working
-
-- [x] Full Flutter app: QR + BLE onboarding, WiFi provisioning, device list, live dashboard, local notifications, listening switch.
-- [x] Persistent device identity and QR generation.
-- [x] MQTT telemetry: heartbeat every 15 s with real temperature and lux via `RouterBridge`.
-- [x] Bidirectional configuration channel.
-- [x] Dataset of 30,487 samples unified at 16 kHz mono, with a documented and reproducible cleaning pipeline.
-- [x] Five-class audio model trained, deployed and running on-device.
-- [x] On-device decision logic: energy gate, per-class thresholds, per-class refractory period.
-- [x] 3D printed enclosure.
-
-### Pending
-
-- [ ] Temperature and light alerts (the sensors are read; the alert rules are not implemented yet).
-- [ ] RTC (DS3231 or NTP) for accurate timestamps without depending on the network.
-- [ ] A private MQTT broker with TLS and authentication. `broker.hivemq.com` is public and only suitable for prototyping — this is a blocker for any real deployment.
-- [ ] Publish the dataset extraction scripts described in `DATASET INFO.pdf`.
-
-## 13. Known limitations
-
-**A fall and a closing door sound the same.** This is a limitation of the
-signal, not of the model: the information needed to separate them is not in
-the audio. That's why the class is `impacte` and the alert reads "possible
-incident", not "fall detected". Thunder has the same problem; the light
-sensor already on the board could help rule it out.
-
-**Plosives look like small impacts.** The /p/, /t/ and /k/ sounds in speech
-are broadband bursts with a sharp attack, and they are the main source of
-false alarms while someone is talking in the room.
-
-**Precision is the weak point.** Roughly 30% of `normal` windows are
-classified as some alert class. The decision logic in §9 is what makes the
-system usable in spite of this.
-
-**No clip in the dataset comes from a real care home.** The system is
-trained on generic public audio and validated in a private room. A real
-deployment would need recordings from the actual environment, with the
-consent that implies.
+No prior knowledge of Arduino, Flutter or 3D printing is assumed. Follow the blocks in order: block 3 (firmware) only depends on block 2 if you want the enclosure assembled, but block 4 (app) requires the firmware to be running first.
 
 ---
+
+## 0. Repository layout
+
+```
+APP/                        Mobile application (Flutter)
+ARDUINO/
+  ├── ai_night_guardian_firmware.tar.gz        Full Arduino App Lab application
+  └── 3D_DESIGNS/                              Enclosure models (.obj / .stl)
+```
+
+Inside the `.tar.gz`, the App Lab application has this shape:
+
+```
+ai_night_guardian_firmware/
+  ├── app.yaml              App Lab application definition
+  ├── python/
+  │    ├── main.py          Entry point: launches the three processes
+  │    └── device_identity.py   Identity + QR generator
+  ├── ai_night_guardian/
+  │    ├── bleperipheral.py     BLE provisioning
+  │    ├── mqtt_publisher.py    Heartbeat, sensors and configuration
+  │    ├── audio_publisher.py   Audio inference and event publishing
+  │    └── *.eim                Edge Impulse model
+  ├── sketch/sketch.ino     Microcontroller code (Modulino sensors)
+  └── requirements.txt      Python dependencies
+```
+
+---
+
+## 1. What you need
+
+**Hardware**
+
+| Item | Notes |
+|---|---|
+| Arduino UNO Q (4 GB) + USB-C power	| The MPU side is what runs Linux and the model | 
+| USB-C microphone	| Audio input for the classifier | 
+| USB-C hub	| The board has a single USB-C port, so the hub is what lets you power it and plug the microphone in at the same time | 
+| Modulino temperature and light sensors	| Daisy-chained over Qwiic/I2C | 
+| USB-C cable to PC	| For the initial setup | 
+| Android phone	| For the app | 
+
+**Software on the PC**
+
+| Program | Purpose |
+|---|---|
+| [Arduino App Lab](https://www.arduino.cc/en/software) | Load and run the firmware |
+| [Ultimaker Cura](https://ultimaker.com/software/ultimaker-cura/) | Prepare the 3D parts |
+| [Flutter SDK](https://docs.flutter.dev/get-started/install) | Build the app |
+| [Git](https://git-scm.com/) | **Required**: the Flutter SDK uses it internally, and without it no `flutter` or `dart` command works |
+| Android Studio (or just the command-line tools + SDK) | Build for Android |
+
+---
+
+## 2. 3D-printed parts
+
+The files live in `ARDUINO/3D_DESIGNS/`. An `.stl` or `.obj` is geometry only: it describes the shape but knows nothing about your printer. You need a **slicer** to turn that shape into the movement instructions the machine understands (a `.gcode` file).
+
+### 2.1 Preparing the file in Cura
+
+1. Install Ultimaker Cura and open it.
+2. On first launch it asks you to **add a printer**. Pick your exact model from the list. If it isn't there, use *Add a non-networked printer → Custom* and enter the build volume and nozzle diameter (usually 0.4 mm). This step is what makes the resulting `.gcode` valid for your machine.
+3. `File → Open File(s)` and select the `.stl` (or the `.obj`; Cura accepts both, `.stl` being the standard for printing).
+4. The part appears on the virtual bed. Check:
+   - **Orientation**: use *Rotate* to lay the largest flat face on the bed. It reduces supports and improves adhesion.
+   - **Size**: with *Scale*, verify the dimensions are what you expect. If the model imports 1000× too small, that's a unit problem in the `.obj` — use the `.stl` instead.
+
+### 2.2 Recommended settings
+
+| Setting | Value | Reason |
+|---|---|---|
+| Material | PLA | Enough for indoor use, easiest to print |
+| Layer height | 0.2 mm | Balance between quality and time |
+| Infill | 15–20 % | The enclosure carries no load |
+| Walls | 2–3 | Sufficient rigidity |
+| Supports | Only for overhangs >45° | Cura highlights them in red once *Support* is enabled |
+| Bed adhesion | *Brim* | Stops corners from lifting |
+
+### 2.3 Printing
+
+1. Click **Slice** (bottom right). Cura computes the toolpath and shows estimated time and material.
+2. Check the *Preview* view to make sure no layers are printing into thin air.
+3. **Save to Disk** or **Save to Removable Drive**: writes the `.gcode` to the printer's SD card or USB stick.
+4. Insert the media into the printer, pick the file on its screen and start the print.
+
+Print every part in the directory before assembling. The microphone must line up with the grille in the enclosure: do not cover it with material, inference depends directly on the acoustic signal.
+
+---
+
+## 3. Arduino UNO Q firmware
+
+### 3.1 First contact with the board
+
+1. Install **Arduino App Lab** on the PC and open it.
+2. Connect the UNO Q to the PC with the USB-C cable and wait for App Lab to detect it.
+3. Enter the **board's WiFi credentials** when prompted. This is the network the device publishes from over MQTT; it must be the same network (or one with Internet access) that the phone uses.
+4. If App Lab offers a board system update, install it and reboot. Do this now, not after loading the application.
+
+### 3.2 Loading the application
+
+App Lab imports packaged applications. Extract the tar first if your version only accepts a folder or a `.zip`:
+
+```bash
+tar -xzf ai_night_guardian_firmware.tar.gz
+```
+
+In the interface:
+
+1. Go to **My Apps**.
+2. Click **Create New App → Import App**.
+3. Select the **whole** package (the `.tar.gz` or the complete `ai_night_guardian_firmware` folder, not individual files). The app bundles the Python code, the microcontroller sketch and `app.yaml`; if you import loose pieces, App Lab won't recognise it as an application.
+4. The application shows up as a card under **My Apps**.
+
+Terminal equivalent (from inside the UNO Q):
+
+```bash
+arduino-app-cli app import ai_night_guardian_firmware.tar.gz
+```
+
+### 3.3 Placing the AI model
+
+The `.eim` file is the compiled model and may not be in the repository because of its size. If it's missing:
+
+1. In Edge Impulse Studio, open the project → **Deployment**.
+2. Choose **Linux (AARCH64)** and hit *Build*. You get an `.eim` file.
+3. Copy it into the application's `ai_night_guardian/` folder over SCP:
+
+   ```bash
+   scp model.eim arduino@<UNO_Q_IP>:/home/arduino/ArduinoApps/ai_night_guardian_firmware/ai_night_guardian/
+   ```
+
+4. Make it executable (it's a binary, not a data file):
+
+   ```bash
+   ssh arduino@<UNO_Q_IP> "chmod +x /home/arduino/ArduinoApps/ai_night_guardian_firmware/ai_night_guardian/*.eim"
+   ```
+
+5. Open `audio_publisher.py` and check that the `EIM_PATH` constant holds **exactly** your file name. If it doesn't match, the script falls into its retry loop and never classifies anything.
+
+### 3.4 Setting the microphone
+
+`audio_publisher.py` has `AUDIO_DEVICE_ID = 8`. That number identifies the microphone on *that* board and changes with the hardware and the order things were plugged in. To find yours, in the UNO Q terminal:
+
+```bash
+python3 -m sounddevice
+```
+
+Find your microphone in the list (or the `default` entry) and put its index in `AUDIO_DEVICE_ID`.
+
+### 3.5 Running it
+
+1. With the application open in App Lab, press **Run**. The first run installs the dependencies from `requirements.txt` and takes several minutes.
+2. Open the App Lab **Console**. You should see, in this order:
+
+   ```
+   [AI Night Guardian] device_id: AING-XXXXXX
+   BLE peripheral launched
+   MQTT publisher launched
+   Audio publisher launched (nice 10)
+   [MQTT audio] Conectado al broker, codigo: Success
+   [AI Night Guardian] Modelo cargado. Clases: [...]
+   [ESCUCHA] Micrófono e inferencia ACTIVOS
+   ```
+
+   If it keeps repeating *Audio no disponible todavía*, go back to 3.3 and 3.4.
+3. This first run creates `device_identity.json` and `provisioning_qr.png` inside the application folder. **Download that PNG** — it's the QR the app scans to pair:
+
+   ```bash
+   scp arduino@<UNO_Q_IP>:/home/arduino/ArduinoApps/ai_night_guardian_firmware/python/provisioning_qr.png .
+   ```
+
+   Print it and stick it on the enclosure. Never publish it anywhere: it contains the device's pairing key.
+
+### 3.6 Run at startup
+
+A monitoring device has to come back on its own after a power cut, without anyone opening App Lab.
+
+1. In the top right corner, next to the **Run** button, click the **arrow (▼)** to open the menu.
+2. Turn on the **Run at startup** toggle.
+3. A **DEFAULT** badge appears next to the application name, confirming it will start on boot.
+
+Terminal equivalent:
+
+```bash
+arduino-app-cli properties set default user:ai_night_guardian_firmware
+```
+
+Test it for real: unplug power, plug it back in, wait a minute and check that the device reappears in the app.
+
+---
+
+## 4. Mobile application
+
+The code is in `APP/`. It's built with Flutter and validated on Android.
+
+### 4.1 Setting up the environment
+
+1. Install **Git** and confirm it responds from a fresh terminal:
+
+   ```bash
+   git --version
+   ```
+
+   Without it, Flutter commands fail with errors about `update_engine_version`.
+2. Install the **Flutter SDK** and add it to your PATH.
+3. Run the diagnostic and fix everything it flags in red:
+
+   ```bash
+   flutter doctor
+   ```
+
+   For Android you need the SDK installed and the licences accepted (`flutter doctor --android-licenses`).
+
+### 4.2 Build and install
+
+```bash
+cd APP
+flutter pub get
+```
+
+With the phone connected over USB and **USB debugging** enabled in developer options:
+
+```bash
+flutter devices     # confirm your phone shows up
+flutter run
+```
+
+To produce an APK you can install without a cable:
+
+```bash
+flutter build apk --release
+```
+
+The file lands in `build/app/outputs/flutter-apk/app-release.apk`. Copy it to the phone and install it, accepting the unknown-sources warning.
+
+### 4.3 Phone permissions
+
+Grant these when the app asks, or under *Settings → Apps → AI Night Guardian → Permissions*:
+
+- **Camera**: scanning the device QR.
+- **Bluetooth / Nearby devices**: BLE provisioning.
+- **Location**: Android requires it for BLE scanning even though position is never used.
+- **Notifications**: without this you won't see alerts.
+
+The phone and the UNO Q must be on the **same WiFi network**.
+
+---
+
+## 5. Pairing device and app
+
+With the firmware running (block 3) and the app installed (block 4):
+
+1. Open the app → **Add device**.
+2. **Scan the QR** stuck on the enclosure. The app reads the `device_id` and the pairing key.
+3. The app looks for the device over **Bluetooth**. Keep the phone within a metre.
+4. Enter the facility's **WiFi SSID and password** and confirm the **room name**.
+5. Wait for confirmation. The process has a countdown of up to 90 seconds: it needs both the BLE reply **and** the first MQTT heartbeat. Don't leave the screen early.
+6. The device appears in the list with a green indicator.
+
+### Final check
+
+1. Open the device detail view and confirm temperature and light are updating (they should refresh every few seconds).
+2. Make sure the **acoustic listening** toggle is on. If it's off, the microphone is never even opened and nothing will be detected.
+3. Trigger an event: clap loudly near the microphone. The UNO Q console shows the classification and, if it clears the threshold, `[EVENTO enviado]`; the notification should reach the phone within seconds.
+
+Coughing won't fire on a single burst: the system requires several distinct coughs within a time window to tell a real coughing fit from throat-clearing. To test it, cough repeatedly for about half a minute.
+
+---
+
+## 6. Troubleshooting
+
+| Symptom | Most likely cause | Fix |
+|---|---|---|
+| `Audio no disponible todavia` looping | `.eim` missing, not executable, or wrong `AUDIO_DEVICE_ID` | Review 3.3 and 3.4 |
+| Many alerts from an empty room | Silence threshold (`SILENCE_RMS`) below the real background noise | Set `DEBUG_RMS = True` for a minute, read the idle values and raise the threshold |
+| Temperature and light arrive as `null` | Inference is hogging the CPU | Confirm `main.py` launches the audio process with `nice -n 10` |
+| Device shows as offline | The UNO Q lost WiFi or the process stopped | Check the App Lab console; confirm **Run at startup** is enabled |
+| App can't find the device over BLE | Bluetooth or location permission off; provisioning window closed | Enable both and reboot the device to reopen the BLE window |
+| No `flutter` or `dart` command works | Git isn't on the PATH | Install Git and open a new terminal |
+| Icon or text doesn't update after rebuilding | Android cache | Uninstall the app from the phone, reboot it, then reinstall |
+
+---
+
+## 7. Privacy note
+
+Audio is never stored or transmitted: it's processed in memory in one-second windows and discarded immediately after inference. The only thing leaving the device is text metadata (room, time, incident type). Any firmware change must preserve this property — it's the basis for the system qualifying legally as an automated emergency sensor rather than a listening microphone.
+
+The default MQTT broker is public (`broker.hivemq.com`), which is fine for a demo. Before any real deployment it must be replaced by your own broker with TLS and per-device credentials.
