@@ -1,33 +1,34 @@
 """
-AI Night Guardian - neteja semantica del dataset amb YAMNet
+AI Night Guardian - semantic dataset cleaning with YAMNet
 ==============================================================
 
-QUIN PROBLEMA RESOL
--------------------
-Els clips de FSD50K/AudioSet porten etiquetatge FEBLE: l'etiqueta diu que
-el so hi apareix en algun moment, no que ompli el clip. La segmentacio per
-energia (segment_events.py) agafa el tros MES SOROLLOS, que no
-necessariament es el so etiquetat -- si un clip "cough" te algu parlant
-fort i tossint fluix, agafem la parla i li posem l'etiqueta "tos".
+WHAT PROBLEM DOES IT SOLVE
+--------------------------
+FSD50K/AudioSet clips use WEAK LABELING: the label says that
+the sound appears at some point, not that it fills the clip. Energy-based
+segmentation (segment_events.py) takes the LOUDEST part, which does
+not necessarily correspond to the labeled sound -- if a "cough" clip has
+someone speaking loudly and coughing quietly, we take the speech and give
+it the "tos" label.
 
-YAMNet es un model entrenat sobre AudioSet (les mateixes dades d'on ve el
-vostre dataset) que classifica 521 tipus de so cada 0.48 segons. Aixo
-permet trobar els fragments on YAMNet CONFIRMA que hi ha el so esperat,
-convertint etiquetes febles a nivell de clip en etiquetes fortes a nivell
-de fragment.
+YAMNet is a model trained on AudioSet (the same data source as your
+dataset) that classifies 521 types of sound every 0.48 seconds. This
+allows us to find the fragments where YAMNet CONFIRMS that the expected
+sound is present, converting weak clip-level labels into strong
+fragment-level labels.
 
-INSTAL·LACIO
+INSTALLATION
 ------------
     pip install tensorflow tensorflow-hub numpy soundfile
 
-(La primera execucio descarrega el model de TF Hub, uns 20 MB.)
+(The first execution downloads the TF Hub model, around 20 MB.)
 
-US
---
+USAGE
+-----
     python yamnet_clean.py dataset_ready dataset_ready_yamnet
 
-Si YAMNet no confirma cap fragment d'un clip, el clip es descarta: es
-justament el cas on l'etiqueta probablement era erronia.
+If YAMNet does not confirm any fragment of a clip, the clip is discarded:
+this is precisely the case where the label was probably incorrect.
 """
 
 import sys
@@ -38,16 +39,16 @@ import soundfile as sf
 
 WINDOW_SEC = 2.0
 MAX_SEGMENTS = 3
-# La classe negativa te molts mes clips de partida i YAMNet li'n descarta
-# pocs, aixi que amb 3 fragments per clip generava ~3.75x mes mostres que
-# veu_angoixa. Amb 1 fragment el dataset queda equilibrat.
+# The negative class has many more starting clips and YAMNet discards
+# only a few of them, so using 3 fragments per clip generated ~3.75x more
+# samples than veu_angoixa. With 1 fragment, the dataset is more balanced.
 SEGMENTS_PER_CLASS = {"normal": 1}
-MIN_SCORE = 0.10  # confianca minima de YAMNet per acceptar un fragment
+MIN_SCORE = 0.10  # minimum YAMNet confidence required to accept a fragment
 SR = 16000
 
-# Les nostres classes -> noms de classe de YAMNet (ontologia AudioSet).
-# Els noms han de coincidir amb els del class map de YAMNet; els que no
-# existeixin s'ignoren amb un avis, aixi que es segur afegir-ne de dubtosos.
+# Our classes -> YAMNet class names (AudioSet ontology).
+# The names must match those in the YAMNet class map; names that do not
+# exist are ignored with a warning, so it is safe to add uncertain ones.
 CLASS_TO_YAMNET = {
     "impacte": [
         "Thump, thud",
@@ -127,20 +128,20 @@ def load_yamnet():
     import tensorflow as tf
     import tensorflow_hub as hub
 
-    print("Carregant YAMNet des de TF Hub (la primera vegada triga)...")
+    print("Loading YAMNet from TF Hub (the first time may take a while)...")
     model = hub.load("https://tfhub.dev/google/yamnet/1")
     class_map_path = model.class_map_path().numpy().decode("utf-8")
     names = []
     with tf.io.gfile.GFile(class_map_path) as f:
-        next(f)  # capcalera
+        next(f)  # header
         for line in f:
             names.append(line.strip().split(",", 2)[2].strip('"'))
-    print(f"YAMNet llest ({len(names)} classes).")
+    print(f"YAMNet ready ({len(names)} classes).")
     return model, names
 
 
 def build_index_map(class_names):
-    """classe nostra -> llista d'indexs de YAMNet."""
+    """Our class -> list of YAMNet indices."""
     lookup = {n: i for i, n in enumerate(class_names)}
     out, missing = {}, []
     for our, targets in CLASS_TO_YAMNET.items():
@@ -153,13 +154,14 @@ def build_index_map(class_names):
         out[our] = idxs
     if missing:
         print(
-            f"Avis: {len(missing)} noms no trobats al class map i ignorats: "
+            f"Warning: {len(missing)} names not found in the class map and ignored: "
             f"{missing[:8]}{'...' if len(missing) > 8 else ''}"
         )
     return out
 
 
 def window_around(audio, center, win):
+    """Returns a win-sample window centered on a point, with zero-padding if needed."""
     start = int(center - win // 2)
     seg = np.zeros(win, dtype=np.float32)
     s0, s1 = max(0, start), min(len(audio), start + win)
@@ -183,14 +185,14 @@ def process(model, idxs, path_in, out_dir, max_segments=MAX_SEGMENTS):
     order = np.argsort(frame_score)[::-1]
 
     win = int(WINDOW_SEC * SR)
-    hop_sec = 0.48  # pas temporal de YAMNet
+    hop_sec = 0.48  # YAMNet temporal step
     chosen, made = [], 0
     for fi in order:
         if frame_score[fi] < MIN_SCORE or made >= max_segments:
             break
         center = int((fi * hop_sec + hop_sec / 2) * SR)
         if any(abs(center - c) < win // 2 for c in chosen):
-            continue  # evita fragments gairebe iguals
+            continue  # avoids nearly identical fragments
         chosen.append(center)
         suffix = "" if max_segments == 1 else f"_y{made}"
         sf.write(
@@ -213,7 +215,7 @@ def main():
     for class_dir in sorted(p for p in src_root.iterdir() if p.is_dir()):
         idxs = index_map.get(class_dir.name)
         if idxs is None:
-            print(f"  {class_dir.name}: sense mapatge a YAMNet, saltada")
+            print(f"  {class_dir.name}: no YAMNet mapping, skipped")
             continue
         out_dir = dst_root / class_dir.name
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -232,14 +234,14 @@ def main():
         total_dropped += dropped
         pct = 100 * dropped / n_in if n_in else 0
         print(
-            f"  {class_dir.name:14s} {n_in:5d} clips -> {n_out:5d} mostres"
-            f"   descartats: {dropped} ({pct:.0f}%)"
+            f"  {class_dir.name:14s} {n_in:5d} clips -> {n_out:5d} samples"
+            f"   discarded: {dropped} ({pct:.0f}%)"
         )
 
-    print(f"\nTotal clips descartats (YAMNet no hi confirma el so): {total_dropped}")
-    print("Un percentatge alt de descartats en una classe indica que les seves")
-    print("etiquetes eren poc fiables -- es informacio util per si sola.")
-    print(f"\nResultat a: {dst_root.resolve()}")
+    print(f"\nTotal clips discarded (YAMNet did not confirm the sound): {total_dropped}")
+    print("A high percentage of discarded clips in a class indicates that its")
+    print("labels were unreliable -- this is useful information by itself.")
+    print(f"\nResult saved to: {dst_root.resolve()}")
 
 
 if __name__ == "__main__":
