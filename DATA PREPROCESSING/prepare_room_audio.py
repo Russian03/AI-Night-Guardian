@@ -1,41 +1,43 @@
 """
-AI Night Guardian - prepara la gravacio de la vostra habitacio
+AI Night Guardian - prepares your room recording
 =================================================================
 
-QUIN PROBLEMA RESOL
--------------------
-El model no ha vist SILENCI ni una sola vegada durant l'entrenament: tots
-els passos del pipeline (segment_events, yamnet_clean) conserven nomes
-fragments amb so audible. A la nit, pero, el silenci es el 90% del que
-arriba al microfon. El model rep una entrada que no s'assembla a res del
-seu entrenament i la softmax ha de repartir la probabilitat entre les 4
-classes existents -- no pot dir "cap". Per aixo dispara "impacte" amb
-confianca alta sobre una habitacio buida.
+WHAT PROBLEM DOES IT SOLVE
+--------------------------
+The model has not seen SILENCE even once during training: all
+pipeline steps (segment_events, yamnet_clean) keep only
+fragments with audible sound. At night, however, silence is 90% of what
+reaches the microphone. The model receives an input that does not
+resemble anything from its training data, and the softmax has to
+distribute the probability among the 4 existing classes -- it cannot say
+"none". This is why it may trigger "impacte" with high confidence in an
+empty room.
 
-Aquest script agafa una gravacio llarga feta amb el VOSTRE microfon a la
-VOSTRA habitacio i la talla en clips de 2s llestos per pujar a Edge
-Impulse com a classe nova. Aixi el model apren com sona el "no passa res"
-amb el vostre hardware concret.
+This script takes a long recording made with YOUR microphone in YOUR
+room and splits it into 2s clips ready to upload to Edge
+Impulse as a new class. This way, the model learns what "nothing is
+happening" sounds like with your specific hardware.
 
-QUE GRAVAR
-----------
-Uns 15 minuts en total, per exemple:
-  - 10 min d'habitacio buida en silenci (el cas dominant a la nit)
-  - 3 min amb la tele o la radio de fons
-  - 2 min amb sorolls de fons normals (finestra oberta, passadis...)
+WHAT TO RECORD
+--------------
+Around 15 minutes in total, for example:
+  - 10 min of an empty room in silence (the dominant situation at night)
+  - 3 min with a TV or radio in the background
+  - 2 min with normal background noises (open window, hallway...)
 
-NO hi ha d'haver cops, crits ni tos: nomes fons.
+There should NOT be any impacts, screams, or coughs: only background
+noise.
 
-REQUEREIX
----------
+REQUIRES
+--------
     pip install numpy soundfile
 
-US
---
+USAGE
+-----
     python prepare_room_audio.py gravacio.wav dataset_ready_yamnet/silenci
 
-Despres pugeu la carpeta a Edge Impulse com a classe "silenci" i
-reentreneu. A l'Arduino, "silenci" mapeja a cap alerta, igual que
+Then upload the folder to Edge Impulse as a "silenci" class and
+retrain. On the Arduino, "silenci" maps to no alert, just like
 "normal".
 """
 
@@ -46,8 +48,8 @@ import numpy as np
 import soundfile as sf
 
 WINDOW_SEC = 2.0
-HOP_SEC = 1.0          # 50% de solapament -> mes mostres de la mateixa gravacio
-TARGET_SR = 16000      # ha de coincidir amb el dataset d'entrenament
+HOP_SEC = 1.0          # 50% overlap -> more samples from the same recording
+TARGET_SR = 16000      # must match the training dataset
 
 
 def main():
@@ -64,15 +66,15 @@ def main():
         audio = audio[:, 0]
 
     if sr != TARGET_SR:
-        print(f"AVIS: la gravacio es a {sr} Hz i el dataset es a {TARGET_SR} Hz.")
-        print("Torna a gravar a 16 kHz o converteix-la abans (per exemple amb")
+        print(f"WARNING: the recording is at {sr} Hz and the dataset is at {TARGET_SR} Hz.")
+        print("Record at 16 kHz or convert it beforehand (for example with")
         print(f"  ffmpeg -i {src.name} -ar 16000 -ac 1 gravacio_16k.wav")
         sys.exit(1)
 
     win = int(WINDOW_SEC * sr)
     hop = int(HOP_SEC * sr)
     if len(audio) < win:
-        print("La gravacio es mes curta que la finestra de 2s.")
+        print("The recording is shorter than the 2s window.")
         sys.exit(1)
 
     rms_values = []
@@ -86,21 +88,21 @@ def main():
     rms = np.array(rms_values)
     db = 20 * np.log10(rms + 1e-10)
 
-    print(f"Durada de la gravacio:  {len(audio)/sr/60:.1f} min")
-    print(f"Clips generats:         {n}")
+    print(f"Recording duration:     {len(audio)/sr/60:.1f} min")
+    print(f"Clips generated:         {n}")
     print()
-    print("Nivells (utils per calibrar el llindar del VAD):")
-    print(f"  RMS minim:     {rms.min():.5f}   ({db.min():.1f} dBFS)")
-    print(f"  RMS mediana:   {np.median(rms):.5f}   ({np.median(db):.1f} dBFS)")
-    print(f"  RMS percentil 95: {np.percentile(rms, 95):.5f}   "
+    print("Levels (useful for calibrating the VAD threshold):")
+    print(f"  Minimum RMS:     {rms.min():.5f}   ({db.min():.1f} dBFS)")
+    print(f"  Median RMS:      {np.median(rms):.5f}   ({np.median(db):.1f} dBFS)")
+    print(f"  95th percentile RMS: {np.percentile(rms, 95):.5f}   "
           f"({np.percentile(db, 95):.1f} dBFS)")
     print()
-    print("Per al VAD, un punt de partida raonable es el percentil 95 d'aquesta")
-    print("gravacio de fons: el que el superi es probablement un esdeveniment.")
-    print("Ajusteu-lo amb proves reals (tossir, tancar la porta) per assegurar")
-    print("que els esdeveniments el superen amb marge.")
+    print("For the VAD, a reasonable starting point is the 95th percentile of this")
+    print("background recording: anything above it is probably an event.")
+    print("Adjust it using real tests (coughing, closing the door) to make sure")
+    print("events exceed the threshold with enough margin.")
     print()
-    print(f"Clips a: {out_dir.resolve()}")
+    print(f"Clips saved to: {out_dir.resolve()}")
 
 
 if __name__ == "__main__":
