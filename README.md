@@ -51,10 +51,9 @@ When it detects an incident, the device records the time and the type and
 publishes a notification to the staff's mobile app, so carers can
 prioritise the rooms that actually need attention.
 
-**Additional, non-acoustic alerts:**
+**Additional:**
 
-- **Ambient light changes** (lights switched on or off) via the Modulino light sensor.
-- **Temperature outside a configurable range** (e.g. `[20 °C, 30 °C]`), particularly relevant during heatwaves.
+In the app you can find the temperature and light information of each room via the two Modulino sensors.
 
 Because it is a **low-cost system with local processing**, it can be
 deployed in care homes, assisted-living facilities and even in the homes of
