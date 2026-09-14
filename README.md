@@ -40,9 +40,9 @@ to a different action:
 
 | Class | What it covers | Device action |
 |---|---|---|
-| `impacte` | Impacts, falls, doors | Alert — possible incident |
-| `veu_angoixa` | Screaming, crying, distress | Alert — immediate attention |
-| `tos` | Coughing fits | Alert — low priority |
+| `impacte` | Impacts, falls, doors | Alert |
+| `veu_angoixa` | Screaming, crying, distress | Alert |
+| `tos` | Coughing fits | Alert |
 | `normal` | Speech, snoring, rain, traffic, alarms | Nothing |
 | `silenci` | A quiet room | Nothing |
 
