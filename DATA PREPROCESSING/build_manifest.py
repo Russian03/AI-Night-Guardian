@@ -1,32 +1,33 @@
 """
-AI Night Guardian - pipeline de neteja i re-etiquetatge del dataset (v3)
-==========================================================================
+AI Night Guardian - dataset cleaning and re-labeling pipeline (v3)
+==================================================================
 
-Genera un manifest.csv amb, per cada fitxer WAV:
-  - etiqueta original i etiqueta final (consolidada, 4 classes)
-  - durada real
-  - si es corrupte/buit (duracio 0.0s)
-  - si es duplicat exacte (per hash MD5)
-  - si necessita padding (duracio < 1s)
-  - si s'ha de mantenir per entrenar (keep_for_training)
+Generates a manifest.csv with, for each WAV file:
+  - original label and final label (consolidated into 4 classes)
+  - actual duration
+  - whether it is corrupted/empty (duration 0.0s)
+  - whether it is an exact duplicate (using MD5 hash)
+  - whether it needs padding (duration < 1s)
+  - whether it should be kept for training (keep_for_training)
 
-Canvi v3: context_normal i soroll_domestic s'han desglossat en 4 classes
-acusticament mes homogenies (veu_humana, soroll_exterior,
-accions_domestiques, alarmes_dispositiu), perque la classe original
-context_normal barrejava sons massa diferents entre si i s'estava
-convertint en un calaix de sastre durant l'entrenament.
+v3 change: context_normal and domestic_noise have been split into
+acoustically more homogeneous classes (human_voice, outdoor_noise,
+domestic_actions, device_alarms), because the original context_normal
+class mixed sounds that were too different and was becoming a
+"catch-all" class during training.
 
-Es pot re-executar sempre que arribin nous audios: nomes cal tornar
-a apuntar-lo a la carpeta arrel del dataset.
+The script can be re-run whenever new audio files arrive: simply point
+it to the root dataset folder again.
 
-Us:
-    python build_manifest.py <carpeta_dataset> [manifest_sortida.csv]
+Usage:
+    python build_manifest.py <dataset_folder> [output_manifest.csv]
 
-Funciona tant amb estructura de carpetes (dataset/<classe>/*.wav) com
-amb una sola carpeta plana on l'etiqueta va codificada al nom de
-fitxer (etiqueta_fsd50k_id.wav, etiqueta_idyoutube_inici_fi.wav...).
-Si en comptes d'aixo teniu un CSV amb columnes (filepath,label),
-feu servir build_manifest_from_csv() en lloc de build_manifest().
+Works both with a folder structure (dataset/<class>/*.wav) and with a
+single flat folder where the label is encoded in the filename
+(label_fsd50k_id.wav, label_idyoutube_start_end.wav...).
+
+If you have a CSV with columns (filepath,label), use
+build_manifest_from_csv() instead of build_manifest().
 """
 
 import csv
@@ -38,41 +39,43 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# 1. Mapa de consolidacio d'etiquetes -> 8 classes finals
-#    None     = descartar del training set
-#    "REVIEW" = cal escoltar mostres abans de decidir
+# 1. Label consolidation map -> 8 final classes
+#    None     = discard from the training set
+#    "REVIEW" = listen to samples before deciding
 # ---------------------------------------------------------------------------
 LABEL_MAP = {
-    # ================= CLASSES CRITIQUES =================
-    # impacte -> possible caiguda. Inclou "door": un cop de porta i un cos
-    # que cau produeixen el mateix transitori de baixa frequencia i no son
-    # separables amb aquestes etiquetes. De nit, dins l'habitacio, tots dos
-    # mereixen comprovacio.
-    "bang": "impacte",
-    "thumpandthud": "impacte",
-    "thumpthud": "impacte",
-    "door": "impacte",
-    # veu_angoixa -> alerta immediata. Crits i plors fusionats: es confonien
-    # entre ells i disparen la mateixa alerta.
-    "screaming": "veu_angoixa",
-    "shout": "veu_angoixa",
-    "yell": "veu_angoixa",
-    "cryingandsobbing": "veu_angoixa",
-    "cryingsobbing": "veu_angoixa",
-    "cryingbaby": "veu_angoixa",
-    "babyinfantcry": "veu_angoixa",
-    # tos -> atencio moderada
-    "cough": "tos",
-    "coughing": "tos",
-    "tos": "tos",
+    # ================= CRITICAL CLASSES =================
+    # impact -> possible fall. Includes "door": a door slam and a falling
+    # body produce the same low-frequency transient and cannot be separated
+    # with these labels. At night, inside the room, both deserve a check.
+    "bang": "impact",
+    "thumpandthud": "impact",
+    "thumpthud": "impact",
+    "door": "impact",
 
-    # ================= CLASSE NEGATIVA UNICA =================
-    # Tot el que NO dispara alerta va aqui. Separar-ho en subclasses
-    # (ambient/veu_normal/respiracio) no va millorar res i generava
-    # confusions entre elles que operativament son irrellevants: totes
-    # van al mateix lloc a l'Arduino. Els roncs SON importants aqui: son
-    # el so dominant tota la nit i el model necessita un lloc correcte on
-    # posar-los, o els classificaria com a tos i alertaria cada nit.
+    # distressed voice -> immediate alert. Screams and crying are merged:
+    # they were being confused with each other and trigger the same alert.
+    "screaming": "distressed_voice",
+    "shout": "distressed_voice",
+    "yell": "distressed_voice",
+    "cryingandsobbing": "distressed_voice",
+    "cryingsobbing": "distressed_voice",
+    "cryingbaby": "distressed_voice",
+    "babyinfantcry": "distressed_voice",
+
+    # cough -> moderate attention
+    "cough": "cough",
+    "coughing": "cough",
+    "tos": "cough",
+
+    # ================= SINGLE NEGATIVE CLASS =================
+    # Everything that does NOT trigger an alert goes here. Separating it
+    # into subclasses (ambient/normal_voice/breathing) did not improve
+    # anything and generated confusions between them that are operationally
+    # irrelevant: they all go to the same place on the Arduino.
+    # Snoring IS important here: it is the dominant sound throughout the
+    # night and the model needs a correct place to classify it, otherwise
+    # it would classify it as cough and trigger an alert every night.
     "speech": "normal",
     "humanvoice": "normal",
     "conversation": "normal",
@@ -98,70 +101,77 @@ LABEL_MAP = {
     "walkfootsteps": "normal",
     "toiletflush": "normal",
 
-    # ================= DESCARTATS =================
-    # riure i plor comparteixen mecanisme vocal i estructura de rafegues:
-    # confusio coneguda amb veu_angoixa, i de nit el riure es rar.
+    # ================= DISCARDED =================
+    # Laughter and crying share vocal mechanisms and burst structure:
+    # known confusion with distressed_voice, and laughter is rare at night.
     "laughing": None,
     "laughter": None,
     "sneeze": None,
     "sneezing": None,
     "burpingandeructation": None,
     "burpingeructation": None,
-    # silence: es gestiona amb llindar d'energia (VAD) abans de la
-    # inferencia, no com a classe.
+
+    # silence: handled using an energy threshold (VAD) before inference,
+    # not as a class.
     "silence": None,
-    # respiratorysounds es la categoria PARE de cough/snore/breathing a
-    # AudioSet: contaminaria la frontera tos/normal.
+
+    # respiratorysounds is the parent category of cough/snore/breathing
+    # in AudioSet: it would contaminate the cough/normal boundary.
     "respiratorysounds": None,
     "insidesmallroom": None,
 }
 
-# Cap maxim per classe final. Nomes s'aplica si la classe el supera,
-# i el mostreig es fa de forma estratificada per etiqueta original
-# per preservar diversitat (ex: context_normal no s'omple nomes de "speech").
+# Maximum number of samples per final class. Only applied if the class
+# exceeds the limit, using stratified sampling by original label to
+# preserve diversity (e.g. context_normal is not filled only with speech).
 MAX_SAMPLES_PER_FINAL_CLASS = 800
-# La classe "normal" agrupa molts sons diferents; li donem mes mostres per
-# cobrir aquesta varietat. El desequilibri resultant es compensa amb
-# "Auto-weight classes" a Edge Impulse.
-# Les classes critiques usen TOTES les mostres disponibles (els seus totals
-# reals son ~1989 i ~1289, per sota d'aquests caps). Capar-les a 800 com
-# feiem abans llencava dades justament d'on menys en teniem. El
-# desequilibri resultant el compensa "Auto-weight classes" a Edge Impulse.
+
+# The "normal" class groups many different sounds, so it is given more
+# samples to cover this variety. The resulting imbalance is compensated
+# using "Auto-weight classes" in Edge Impulse.
+#
+# The critical classes use ALL available samples (their real totals are
+# ~1989 and ~1289, below these limits). Limiting them to 800 as we did
+# before would discard data precisely where we have fewer samples.
+# The resulting imbalance is compensated using "Auto-weight classes"
+# in Edge Impulse.
 PER_CLASS_CAP = {
-    "impacte": 2000,
-    "veu_angoixa": 2000,
-    "tos": 1500,
+    "impact": 2000,
+    "distressed_voice": 2000,
+    "cough": 1500,
     "normal": 2500,
 }
+
 SEED = 42
 
-# Etiquetes conegudes, ordenades de mes llarga a mes curta perque el
-# matching per prefix trii "alarmclock" abans que "alarm" quan tots dos
-# encaixarien.
+# Known labels, sorted from longest to shortest so that prefix matching
+# selects "alarmclock" before "alarm" when both could match.
 _KNOWN_LABELS_SORTED = sorted(LABEL_MAP.keys(), key=len, reverse=True)
 
 
 # ---------------------------------------------------------------------------
-# 2. Utilitats de baix nivell
+# 2. Low-level utilities
 # ---------------------------------------------------------------------------
 def infer_label_from_filename(path: Path) -> str:
-    """Extreu l'etiqueta original del NOM DE FITXER, no de la carpeta.
+    """Extracts the original label from the FILE NAME, not the folder.
 
-    Funciona amb noms de FSD50K (etiqueta_fsd50k_id.wav) i AudioSet
-    (etiqueta_idyoutube_inici_final.wav) i qualsevol altra convencio,
-    sempre que el fitxer comenci per una de les LABEL_MAP conegudes
-    seguida de "_". Si no hi ha coincidencia, retorna el nom sencer
-    (sortira com a UNKNOWN mes endavant, cosa volguda).
+    Works with FSD50K names (label_fsd50k_id.wav) and AudioSet names
+    (label_youtube_id_start_end.wav) and any other convention, as long
+    as the file starts with one of the known LABEL_MAP labels followed
+    by "_". If there is no match, returns the full filename stem
+    (which will appear as UNKNOWN later, as intended).
     """
     stem = path.stem
+
     for lbl in _KNOWN_LABELS_SORTED:
         if stem == lbl or stem.startswith(lbl + "_"):
             return lbl
+
     return stem
 
 
 def wav_duration(path: Path) -> float:
-    """Durada en segons. Retorna -1.0 si el fitxer no es pot llegir."""
+    """Duration in seconds. Returns -1.0 if the file cannot be read."""
     try:
         with wave.open(str(path), "rb") as w:
             frames = w.getnframes()
@@ -173,34 +183,46 @@ def wav_duration(path: Path) -> float:
 
 def md5sum(path: Path, block_size: int = 65536) -> str:
     h = hashlib.md5()
+
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(block_size), b""):
             h.update(block)
+
     return h.hexdigest()
 
 
 # ---------------------------------------------------------------------------
-# 3. Construccio del manifest
+# 3. Manifest construction
 # ---------------------------------------------------------------------------
 def build_manifest(dataset_root: str, output_csv: str):
-    """Funciona tant si el dataset es una carpeta plana amb l'etiqueta
-    codificada al nom de fitxer (etiqueta_fsd50k_id.wav, etiqueta_id_ini_fi.wav...)
-    com si hi ha una carpeta per classe -- en aquest segon cas el nom de
-    fitxer sol coincidir amb el de la carpeta, aixi que el resultat es el mateix."""
+    """Works both with a flat folder where the label is encoded in the
+    filename (label_fsd50k_id.wav, label_id_start_end.wav...)
+    and with one folder per class. In the latter case, the filename
+    usually matches the folder name, so the result is the same.
+    """
     root = Path(dataset_root)
+
     wav_paths = sorted(root.rglob("*.wav"))
     entries = [(p, infer_label_from_filename(p)) for p in wav_paths]
+
     return _process_entries(entries, output_csv)
 
 
-def build_manifest_from_csv(dataset_root: str, labels_csv: str, output_csv: str):
-    """Alternativa si les etiquetes venen en un CSV (columnes: filepath,label)
-    en comptes d'estructura de carpetes."""
+def build_manifest_from_csv(
+    dataset_root: str,
+    labels_csv: str,
+    output_csv: str
+):
+    """Alternative if labels come from a CSV (columns: filepath,label)
+    instead of a folder structure.
+    """
     root = Path(dataset_root)
     entries = []
+
     with open(labels_csv, newline="") as f:
         for row in csv.DictReader(f):
             entries.append((root / row["filepath"], row["label"]))
+
     return _process_entries(entries, output_csv)
 
 
@@ -210,8 +232,14 @@ def _process_entries(entries, output_csv):
 
     for wav_path, orig_label in entries:
         duration = wav_duration(wav_path)
+
         file_hash = md5sum(wav_path) if duration >= 0 else None
-        is_duplicate = file_hash is not None and file_hash in seen_hashes
+
+        is_duplicate = (
+            file_hash is not None
+            and file_hash in seen_hashes
+        )
+
         if file_hash is not None and not is_duplicate:
             seen_hashes[file_hash] = str(wav_path)
 
@@ -231,15 +259,21 @@ def _process_entries(entries, output_csv):
         )
 
     rows = _subsample_majority_classes(rows)
+
     _write_csv(rows, output_csv)
     _print_summary(rows)
+
     return rows
 
 
 # ---------------------------------------------------------------------------
-# 4. Mostreig estratificat de les classes majoritaries
+# 4. Stratified sampling of majority classes
 # ---------------------------------------------------------------------------
-def _subsample_majority_classes(rows, cap=MAX_SAMPLES_PER_FINAL_CLASS, seed=SEED):
+def _subsample_majority_classes(
+    rows,
+    cap=MAX_SAMPLES_PER_FINAL_CLASS,
+    seed=SEED
+):
     random.seed(seed)
 
     eligible = [
@@ -249,35 +283,58 @@ def _subsample_majority_classes(rows, cap=MAX_SAMPLES_PER_FINAL_CLASS, seed=SEED
         and not r["is_corrupt_or_empty"]
         and r["final_label"] not in ("UNKNOWN", None, "REVIEW")
     ]
+
     by_final = defaultdict(list)
+
     for r in eligible:
         by_final[r["final_label"]].append(r)
 
     keep_paths = set()
+
     for final_label, group in by_final.items():
-        cap = PER_CLASS_CAP.get(final_label, MAX_SAMPLES_PER_FINAL_CLASS)
+        cap = PER_CLASS_CAP.get(
+            final_label,
+            MAX_SAMPLES_PER_FINAL_CLASS
+        )
+
         total = len(group)
+
         if total <= cap:
             keep_paths.update(r["filepath"] for r in group)
             continue
 
-        # mostreig estratificat per etiqueta original -> preserva diversitat
+        # Stratified sampling by original label -> preserves diversity.
         by_orig = defaultdict(list)
+
         for r in group:
             by_orig[r["orig_label"]].append(r)
 
         selected_paths = set()
+
         for orig_label, sub in by_orig.items():
             n = max(1, round(cap * len(sub) / total))
             n = min(n, len(sub))
+
             for r in random.sample(sub, n):
                 selected_paths.add(r["filepath"])
 
         if len(selected_paths) > cap:
-            selected_paths = set(random.sample(sorted(selected_paths), cap))
+            selected_paths = set(
+                random.sample(sorted(selected_paths), cap)
+            )
+
         elif len(selected_paths) < cap:
-            remaining = [r for r in group if r["filepath"] not in selected_paths]
-            extra_needed = min(cap - len(selected_paths), len(remaining))
+            remaining = [
+                r
+                for r in group
+                if r["filepath"] not in selected_paths
+            ]
+
+            extra_needed = min(
+                cap - len(selected_paths),
+                len(remaining)
+            )
+
             if extra_needed > 0:
                 for r in random.sample(remaining, extra_needed):
                     selected_paths.add(r["filepath"])
@@ -286,17 +343,20 @@ def _subsample_majority_classes(rows, cap=MAX_SAMPLES_PER_FINAL_CLASS, seed=SEED
 
     for r in rows:
         r["keep_for_training"] = r["filepath"] in keep_paths
+
     return rows
 
 
 # ---------------------------------------------------------------------------
-# 5. Sortida
+# 5. Output
 # ---------------------------------------------------------------------------
 def _write_csv(rows, output_csv):
     if not rows:
-        print("Cap fitxer trobat.")
+        print("No files found.")
         return
+
     fieldnames = list(rows[0].keys())
+
     with open(output_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -305,40 +365,96 @@ def _write_csv(rows, output_csv):
 
 def _print_summary(rows):
     kept = [r for r in rows if r["keep_for_training"]]
-    dup = sum(1 for r in rows if r["is_duplicate"])
-    corrupt = sum(1 for r in rows if r["is_corrupt_or_empty"])
-    review = sum(1 for r in rows if r["final_label"] == "REVIEW")
-    unknown = sum(1 for r in rows if r["final_label"] == "UNKNOWN")
-    padding = sum(1 for r in rows if r["needs_padding"])
 
-    print(f"Total escanejats:        {len(rows)}")
-    print(f"Duplicats detectats:     {dup}")
-    print(f"Corruptes/buits (0.0s):  {corrupt}")
-    print(f"Pendents de revisio:     {review}  (respiratorysounds, insidesmallroom)")
-    print(f"Etiqueta desconeguda:    {unknown}")
-    print(f"Necessiten padding <1s:  {padding}")
-    print(f"Mantinguts per entrenar: {len(kept)}")
+    dup = sum(1 for r in rows if r["is_duplicate"])
+    corrupt = sum(
+        1 for r in rows
+        if r["is_corrupt_or_empty"]
+    )
+    review = sum(
+        1 for r in rows
+        if r["final_label"] == "REVIEW"
+    )
+    unknown = sum(
+        1 for r in rows
+        if r["final_label"] == "UNKNOWN"
+    )
+    padding = sum(
+        1 for r in rows
+        if r["needs_padding"]
+    )
+
+    print(f"Total scanned:           {len(rows)}")
+    print(f"Duplicates detected:     {dup}")
+    print(f"Corrupted/empty (0.0s):  {corrupt}")
+    print(f"Pending review:          {review} "
+          f"(respiratorysounds, insidesmallroom)")
+    print(f"Unknown label:           {unknown}")
+    print(f"Need padding <1s:        {padding}")
+    print(f"Kept for training:       {len(kept)}")
     print()
-    print("Distribucio final (nomes els mantinguts, despres del cap):")
-    for label, n in Counter(r["final_label"] for r in kept).most_common():
+
+    print("Final distribution "
+          "(only kept samples, after applying the cap):")
+
+    for label, n in Counter(
+        r["final_label"] for r in kept
+    ).most_common():
         print(f"  {label:20s} {n}")
+
 
     if unknown:
         unknown_labels = sorted(
-            {r["orig_label"] for r in rows if r["final_label"] == "UNKNOWN"}
+            {
+                r["orig_label"]
+                for r in rows
+                if r["final_label"] == "UNKNOWN"
+            }
         )
+
         print()
-        print(f"AVIS: {unknown} fitxers tenen una etiqueta que no apareix a LABEL_MAP:")
+        print(
+            f"WARNING: {unknown} files have a label "
+            f"that does not appear in LABEL_MAP:"
+        )
+
         for lbl in unknown_labels:
-            n = sum(1 for r in rows if r["orig_label"] == lbl)
-            print(f"  - {lbl}  ({n} fitxers)")
-        print("Decideix a quina classe final mapegen (o None per descartar-les)")
-        print("i afegeix-les a LABEL_MAP abans de donar per bo el manifest.")
-        print("Aquests fitxers queden exclosos de 'keep_for_training' fins que ho facis.")
+            n = sum(
+                1
+                for r in rows
+                if r["orig_label"] == lbl
+            )
+
+            print(f"  - {lbl}  ({n} files)")
+
+        print(
+            "Decide which final class they should map to "
+            "(or None to discard them)"
+        )
+
+        print(
+            "and add them to LABEL_MAP before considering "
+            "the manifest valid."
+        )
+
+        print(
+            "These files remain excluded from "
+            "'keep_for_training' until you do so."
+        )
 
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    dataset_root = sys.argv[1] if len(sys.argv) > 1 else "./dataset"
-    output_csv = sys.argv[2] if len(sys.argv) > 2 else "manifest.csv"
+    dataset_root = (
+        sys.argv[1]
+        if len(sys.argv) > 1
+        else "./dataset"
+    )
+
+    output_csv = (
+        sys.argv[2]
+        if len(sys.argv) > 2
+        else "manifest.csv"
+    )
+
     build_manifest(dataset_root, output_csv)
