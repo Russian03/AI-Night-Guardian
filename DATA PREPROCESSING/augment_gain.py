@@ -1,44 +1,45 @@
 """
-AI Night Guardian - augmentacio de guany del dataset
-=======================================================
+AI Night Guardian - dataset gain augmentation
+================================================
 
-QUIN PROBLEMA RESOL
--------------------
-El bloc MFE NO es invariant al nivell: normalitza contra un noise floor
-fix, no contra l'energia del senyal. El mateix so a -16 dBFS i a -50 dBFS
-produeix caracteristiques molt diferents (mesurat: desplacament mitja de
--0.33 en una escala de 0 a 1).
+WHAT PROBLEM IT SOLVES
+----------------------
+The MFE block is NOT invariant to signal level: it normalizes against a
+fixed noise floor, not against the signal energy. The same sound at
+-16 dBFS and -50 dBFS produces very different features (measured:
+mean shift of -0.33 on a scale from 0 to 1).
 
-Mesures reals d'aquesta installacio:
-    clip del dataset      RMS 4857   (-16.6 dBFS)
-    palmada a prop        RMS  741
-    palmada lluny         RMS  365
-    caiguda del sofa      RMS  148
-    parlant               RMS   50-70
-    silenci               RMS   24
+Real measurements from this installation:
+    dataset clip          RMS 4857   (-16.6 dBFS)
+    close clap            RMS  741
+    distant clap          RMS  365
+    sofa fall             RMS  148
+    speaker               RMS   50-70
+    silence               RMS   24
 
-O sigui: el desplegament treballa ~30 dB per sota del dataset, i a mes el
-MATEIX esdeveniment dona 148 o 741 segons la distancia. No hi ha cap
-nivell unic al qual ajustar el dataset.
+In other words: the deployment operates ~30 dB below the dataset, and
+the SAME event produces 148 or 741 depending on the distance. There is
+no single level to which the dataset should be adjusted.
 
-La solucio no es escalar el dataset a un nivell concret, sino fer el model
-ROBUST al nivell: que vegi cada so a moltes intensitats. Aixi deixa de
-dependre del volum absolut i s'ha de fixar en la forma espectral, que es
-el que realment distingeix un cop d'una veu.
+The solution is NOT to scale the dataset to a specific level, but to make
+the model ROBUST to signal level: it should see each sound at many
+different intensities. This way, it becomes less dependent on absolute
+volume and has to focus on the spectral shape, which is what actually
+distinguishes a thump from speech.
 
-Aixo tambe fa el sistema robust a la DISTANCIA, que es la variable que
-mes canvia entre una residencia i una altra.
+This also makes the system robust to DISTANCE, which is the variable that
+changes the most between different care homes.
 
-REQUEREIX
----------
+REQUIRES
+--------
     pip install numpy soundfile
 
-US
---
+USAGE
+-----
     python augment_gain.py dataset_ready_yamnet dataset_ready_gain
 
-No multiplica la mida del dataset: assigna a cada clip un guany aleatori,
-aixi que l'entrenament triga el mateix.
+This does not increase the dataset size: each clip is assigned a random
+gain, so training takes the same amount of time.
 """
 
 import random
@@ -50,14 +51,14 @@ import soundfile as sf
 
 SEED = 42
 
-# Rang de nivells objectiu, en dBFS de RMS. Cobreix des del nivell del
-# dataset original (-17) fins al dels esdeveniments fluixos i llunyans
-# mesurats al dispositiu (-47), amb marge als dos extrems.
+# Target level range, in dBFS RMS. Covers the level of the original
+# dataset (-17) down to the level of quiet and distant events
+# measured on the device (-47), with some margin at both ends.
 TARGET_DBFS_MIN = -50.0
 TARGET_DBFS_MAX = -15.0
 
-# Proporcio de clips que es deixen al nivell original. Convé no reescalar
-# absolutament tot: manté una referencia neta dins del conjunt.
+# Proportion of clips kept at their original level. It is useful not to
+# rescale everything: this maintains a clean reference within the dataset.
 KEEP_ORIGINAL_RATIO = 0.15
 
 
@@ -80,14 +81,14 @@ def process(path_in, path_out):
     gain = 10 ** ((target - current) / 20)
 
     out = audio * gain
-    # evita saturacio: si el pic passaria d'1.0, redueix el guany
+    # Prevents clipping: if the peak would exceed 1.0, reduce the gain.
     peak = np.abs(out).max()
     if peak > 0.99:
         out = out * (0.99 / peak)
 
-    # es guarda en PCM_16 a proposit: el microfon real tambe entrega 16
-    # bits en aquest rang, aixi que la perdua de resolucio dels nivells
-    # baixos forma part del que el model ha d'aprendre a gestionar.
+    # Saved as PCM_16 on purpose: the real microphone also outputs 16-bit
+    # audio in this range, so the loss of resolution at low levels is part
+    # of what the model must learn to handle.
     sf.write(path_out, out, sr, subtype="PCM_16")
     return rms_dbfs(out)
 
@@ -110,21 +111,21 @@ def main():
                 if lvl is not None:
                     levels.append(lvl)
             except Exception as e:
-                print(f"  error a {wav_path.name}: {e}")
+                print(f"  error in {wav_path.name}: {e}")
 
         all_levels += levels
         if levels:
             print(f"  {class_dir.name:14s} {n:5d} clips   "
-                  f"nivells {min(levels):.0f} a {max(levels):.0f} dBFS")
+                  f"levels {min(levels):.0f} to {max(levels):.0f} dBFS")
 
     if all_levels:
         arr = np.array(all_levels)
         print()
-        print(f"Nivells del dataset resultant: {arr.min():.0f} a {arr.max():.0f} dBFS "
-              f"(mediana {np.median(arr):.0f})")
-        print("El dispositiu mesura entre -55 (parlant) i -33 dBFS (palmada a prop),")
-        print("aixi que aquest rang cobreix el desplegament real amb marge.")
-    print(f"\nResultat a: {dst_root.resolve()}")
+        print(f"Resulting dataset levels: {arr.min():.0f} to {arr.max():.0f} dBFS "
+              f"(median {np.median(arr):.0f})")
+        print("The device measures between -55 (speaker) and -33 dBFS (close clap),")
+        print("so this range covers the real deployment with some margin.")
+    print(f"\nOutput: {dst_root.resolve()}")
 
 
 if __name__ == "__main__":
