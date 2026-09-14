@@ -1,17 +1,17 @@
 """
-AI Night Guardian - materialitza el dataset final
+AI Night Guardian - materialize the final dataset
 ====================================================
 
-Llegeix manifest_corregit.csv i copia NOMES els fitxers marcats
-keep_for_training=True cap a una estructura de carpetes per classe,
-llesta per arrossegar/pujar a Edge Impulse Studio.
+Reads manifest_corregit.csv and copies ONLY the files marked
+keep_for_training=True into a class-based folder structure,
+ready to drag/upload to Edge Impulse Studio.
 
-Execucio (des de la carpeta AI-Night-Guardian-main, on hi ha
-dataset_final_16khz/ i manifest_corregit.csv):
+Execution (from the AI-Night-Guardian-main folder, where
+dataset_final_16khz/ and manifest_corregit.csv are located):
 
     python materialize_dataset.py
 
-Genera:
+Generates:
     dataset_ready/
         tos/*.wav
         crit_ajuda/*.wav
@@ -22,8 +22,8 @@ Genera:
         context_normal/*.wav
         soroll_domestic/*.wav
 
-Es pot re-executar sense perill: si dataset_ready ja existeix, nomes
-afegeix/sobreescriu els fitxers, no esborra res per si sol.
+It can be re-run safely: if dataset_ready already exists, it only
+adds/overwrites files; it does not delete anything by itself.
 """
 
 import csv
@@ -34,7 +34,7 @@ from collections import Counter
 
 MANIFEST_PATH = sys.argv[1] if len(sys.argv) > 1 else "manifest_corregit.csv"
 OUTPUT_DIR = Path(sys.argv[2] if len(sys.argv) > 2 else "dataset_ready")
-DATASET_ROOT = Path(".")  # les rutes del manifest son relatives a aqui
+DATASET_ROOT = Path(".")  # manifest paths are relative to this location
 
 
 def main():
@@ -63,19 +63,19 @@ def main():
             except FileNotFoundError:
                 missing.append(str(src))
 
-    print(f"Fitxers copiats: {sum(copied.values())}")
+    print(f"Files copied: {sum(copied.values())}")
     for label, n in copied.most_common():
         print(f"  {label}: {n}")
-    print(f"\nFilats (keep_for_training=False, ja exclosos abans): {skipped_not_kept}")
+    print(f"\nFiltered (keep_for_training=False, already excluded): {skipped_not_kept}")
 
     if missing:
-        print(f"\nAVIS: {len(missing)} fitxers no s'han trobat al disc. Primers 10:")
+        print(f"\nWARNING: {len(missing)} files were not found on disk. First 10:")
         for p in missing[:10]:
             print(f"  - {p}")
-        print("Comprova que executes l'script des de AI-Night-Guardian-main")
-        print("(la mateixa carpeta que conte dataset_final_16khz).")
+        print("Check that you are running the script from AI-Night-Guardian-main")
+        print("(the same folder containing dataset_final_16khz).")
     else:
-        print("\nCap fitxer perdut. dataset_ready/ ja esta llest per pujar a Edge Impulse.")
+        print("\nNo missing files. dataset_ready/ is ready to upload to Edge Impulse.")
 
 
 if __name__ == "__main__":
