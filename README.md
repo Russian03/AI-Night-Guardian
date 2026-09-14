@@ -9,7 +9,6 @@ Submitted to **HackEstiu 2026** (Universitat Politècnica de Catalunya).
 - **Affiliation:** ETSETB — Universitat Politècnica de Catalunya (UPC), Barcelona
 - **Hardware:** Arduino UNO Q + Modulino (temperature / light) + USB-C lavalier microphone + 3D printed enclosure
 - **License:** MIT — see [`LICENSE`](LICENSE)
-- **Arduino Project Hub:** *[add link]*
 - **Edge Impulse™ project (public):** see [`Edge Impulse`](https://studio.edgeimpulse.com/public/1106722/live)
 - **Demo video:** see [`Video`](https://youtu.be/zw-_enrB-u0)
 
