@@ -1,30 +1,30 @@
 """
-AI Night Guardian - segmentacio per esdeveniments (substitueix crop_events)
+AI Night Guardian - event-based segmentation (replaces crop_events)
 =============================================================================
 
-Per que aixo es millor que retallar un tros fix de 2s:
+Why this is better than cropping a fixed 2s section:
 
-  Els clips de FSD50K/AudioSet porten etiquetatge FEBLE: l'etiqueta indica
-  que el so hi apareix EN ALGUN MOMENT, no que ompli el clip. Un clip de
-  10s etiquetat "cough" pot tenir 1s de tos i 9s de silenci. Si el partim
-  en finestres d'1s, la majoria son silenci etiquetat com a tos, i el
-  model apren que el silenci es tos.
+  FSD50K/AudioSet clips use WEAK LABELING: the label indicates that
+  the sound appears AT SOME POINT, not that it fills the entire clip. A
+  10s clip labeled "cough" may contain 1s of coughing and 9s of silence.
+  If we split it into 1s windows, most of them are silence labeled as
+  cough, and the model learns that silence is cough.
 
-  Aquest script detecta TOTES les regions d'un clip on l'energia supera el
-  soroll de fons del propi clip, i n'exporta cadascuna com a mostra
-  independent. Un clip amb tres cops de tos dona tres mostres netes en
-  comptes d'una de dolenta, el silenci queda fora, i les classes
-  d'esdeveniment guanyen mostres.
+  This script detects ALL regions in a clip where the energy exceeds the
+  clip's own background noise, and exports each one as an independent
+  sample. A clip with three cough events produces three clean samples
+  instead of one bad one, silence is left out, and the event
+  classes gain more samples.
 
-  Per a la classe negativa "normal" NO te sentit buscar pics (el so es
-  continu i buscar-hi el pic crearia transitoris artificials que es
-  confonen amb impactes), aixi que se n'agafen finestres a l'atzar
-  descartant nomes les que son silenci pur.
+  For the negative "normal" class, looking for peaks does NOT make sense
+  (the sound is continuous and looking for peaks would create artificial
+  transients that could be confused with impacts), so random windows are
+  selected, discarding only those that are pure silence.
 
-Requereix numpy i soundfile:
+Requires numpy and soundfile:
     pip install numpy soundfile
 
-Us:
+Usage:
     python segment_events.py dataset_ready dataset_ready_segmented
 """
 
@@ -35,16 +35,16 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-WINDOW_SEC = 2.0        # durada de cada mostra exportada
-FRAME_SEC = 0.025       # finestra d'analisi d'energia
+WINDOW_SEC = 2.0        # duration of each exported sample
+FRAME_SEC = 0.025       # energy analysis window
 HOP_SEC = 0.010
-THRESHOLD_DB = 10.0     # dB per sobre del soroll de fons del clip
-MIN_EVENT_SEC = 0.08    # descarta pics massa curts (clics, artefactes)
-MERGE_GAP_SEC = 0.25    # uneix events separats per menys d'aixo
-MAX_SEGMENTS = 3        # limit per clip, perque un clip llarg no domini
+THRESHOLD_DB = 10.0     # dB above the clip's background noise
+MIN_EVENT_SEC = 0.08    # discard very short peaks (clicks, artifacts)
+MERGE_GAP_SEC = 0.25    # merge events separated by less than this
+MAX_SEGMENTS = 3        # limit per clip, so a long clip does not dominate
 SEED = 42
 
-# classes on el so es continu -> finestres aleatories en comptes d'events
+# classes where the sound is continuous -> random windows instead of events
 CONTINUOUS_CLASSES = {"normal"}
 
 
@@ -61,7 +61,7 @@ def frame_energies_db(audio, sr):
 
 
 def find_events(audio, sr):
-    """Retorna llista de (inici, fi) en mostres de les regions actives."""
+    """Returns a list of (start, end) in samples for active regions."""
     db, hop = frame_energies_db(audio, sr)
     if db.size == 0:
         return []
@@ -71,7 +71,7 @@ def find_events(audio, sr):
     if not active.any():
         return []
 
-    # regions contigues actives
+    # contiguous active regions
     edges = np.diff(active.astype(int))
     starts = list(np.where(edges == 1)[0] + 1)
     ends = list(np.where(edges == -1)[0] + 1)
@@ -82,7 +82,7 @@ def find_events(audio, sr):
 
     regions = [(s * hop, e * hop) for s, e in zip(starts, ends)]
 
-    # uneix regions properes
+    # merge nearby regions
     merged = []
     for s, e in regions:
         if merged and s - merged[-1][1] < MERGE_GAP_SEC * sr:
@@ -90,7 +90,7 @@ def find_events(audio, sr):
         else:
             merged.append((s, e))
 
-    # descarta els massa curts, ordena per energia i queda't amb els millors
+    # discard very short regions, sort by energy and keep the best ones
     min_len = MIN_EVENT_SEC * sr
     merged = [(s, e) for s, e in merged if e - s >= min_len]
     merged.sort(key=lambda r: float(np.sum(audio[r[0]:r[1]].astype(np.float64) ** 2)),
@@ -99,7 +99,7 @@ def find_events(audio, sr):
 
 
 def window_around(audio, center, win):
-    """Finestra de win mostres centrada, amb zero-padding si cal."""
+    """Returns a win-sample window centered on a point, with zero-padding if needed."""
     start = int(center - win // 2)
     seg = np.zeros(win, dtype=audio.dtype)
     src_start = max(0, start)
@@ -121,7 +121,7 @@ def process(path_in, out_dir, continuous):
             k = min(MAX_SEGMENTS, max(1, (len(audio) - win) // win))
             starts = random.sample(range(len(audio) - win + 1), k)
             segments = [audio[s : s + win] for s in starts]
-            # descarta finestres que son silenci pur
+            # discard windows that are pure silence
             db_all, _ = frame_energies_db(audio, sr)
             floor = np.percentile(db_all, 20) if db_all.size else -100
             segments = [
@@ -163,16 +163,16 @@ def main():
             except Exception as e:
                 errors.append((str(wav_path), str(e)))
 
-        mode = "aleatori" if continuous else "events"
-        print(f"  {class_dir.name:14s} {mode:9s} {n_in:5d} clips -> {n_out:5d} mostres"
-              f"  (~{n_out * 3} finestres)")
+        mode = "random" if continuous else "events"
+        print(f"  {class_dir.name:14s} {mode:9s} {n_in:5d} clips -> {n_out:5d} samples"
+              f"  (~{n_out * 3} windows)")
 
-    print(f"\nClips sense cap event detectat (descartats): {dropped}")
+    print(f"\nClips with no detected event (discarded): {dropped}")
     if errors:
-        print(f"Errors: {len(errors)}. Primers 3:")
+        print(f"Errors: {len(errors)}. First 3:")
         for p, e in errors[:3]:
             print(f"  - {p}: {e}")
-    print(f"\nResultat a: {dst_root.resolve()}")
+    print(f"\nResult saved to: {dst_root.resolve()}")
 
 
 if __name__ == "__main__":
